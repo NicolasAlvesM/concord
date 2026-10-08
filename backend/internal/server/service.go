@@ -1,0 +1,213 @@
+package server
+
+import (
+	"context"
+	"errors"
+
+	"github.com/google/uuid"
+)
+
+var (
+	ErrInviteNotFound   = errors.New("invite not found")
+	ErrNotInvitee       = errors.New("you are not the invitee")
+	ErrInviteNotPending = errors.New("invite is not pending")
+	ErrAlreadyMember    = errors.New("you are already a member of this server")
+)
+
+type EventPublisher interface {
+	PublishServerUpdate(event UpdateEvent)
+	PublishServerDelete(event DeleteEvent)
+	PublishMemberJoin(event MemberJoinEvent)
+	PublishMemberLeave(event MemberLeaveEvent)
+}
+
+type Service struct {
+	repository *Repository
+	publisher  EventPublisher
+}
+
+func ServerService(repository *Repository, publisher EventPublisher) *Service {
+	return &Service{
+		repository: repository,
+		publisher:  publisher,
+	}
+}
+
+func (s *Service) Create(
+	ctx context.Context,
+	server *Server,
+) error {
+	if server.Name == "" {
+		return errors.New("name is required")
+	}
+
+	if server.OwnerID == "" {
+		return errors.New("owner_id is required")
+	}
+
+	server.ID = uuid.New().String()
+
+	if err := s.repository.Create(ctx, server); err != nil {
+		return err
+	}
+
+	member := &ServerMember{}
+	if err := s.repository.AddingUserServer(ctx, server, member, server.OwnerID, "admin"); err != nil {
+		return err
+	}
+
+	fullMember, err := s.repository.FindMemberByUserID(ctx, server.ID, server.OwnerID)
+	if err == nil && s.publisher != nil {
+		s.publisher.PublishMemberJoin(MemberJoinEvent{
+			ServerID: server.ID,
+			Member:   *fullMember,
+		})
+	}
+
+	return nil
+}
+
+func (s *Service) FindByID(ctx context.Context, id string) (*Server, error) {
+	return s.repository.FindByID(ctx, id)
+}
+
+func (s *Service) Update(ctx context.Context, id string, name string, iconURL string) (*Server, error) {
+	if name == "" {
+		return nil, errors.New("name is required")
+	}
+
+	srv, err := s.repository.FindByID(ctx, id)
+	if err != nil {
+		return nil, errors.New("server not found")
+	}
+
+	if err := s.repository.Update(ctx, id, name, iconURL); err != nil {
+		return nil, err
+	}
+
+	updated, err := s.repository.FindByID(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+
+	if s.publisher != nil {
+		s.publisher.PublishServerUpdate(UpdateEvent{
+			ServerID: srv.ID,
+			Server:   *updated,
+		})
+	}
+
+	return updated, nil
+}
+
+func (s *Service) Delete(ctx context.Context, id string) error {
+	srv, err := s.repository.FindByID(ctx, id)
+	if err != nil {
+		return errors.New("server not found")
+	}
+
+	if err := s.repository.Delete(ctx, id); err != nil {
+		return err
+	}
+
+	if s.publisher != nil {
+		s.publisher.PublishServerDelete(DeleteEvent{
+			ServerID: srv.ID,
+		})
+	}
+
+	return nil
+}
+
+func (s *Service) ListByUserID(ctx context.Context, userID string) ([]Server, error) {
+	return s.repository.ListByUserID(ctx, userID)
+}
+
+func (s *Service) ListMembers(ctx context.Context, serverID string) ([]ServerMember, error) {
+	return s.repository.ListMembers(ctx, serverID)
+}
+
+func (s *Service) IsMember(ctx context.Context, serverID string, userID string) (bool, error) {
+	return s.repository.IsMember(ctx, serverID, userID)
+}
+
+func (s *Service) InviteUser(ctx context.Context, serverID string, inviterID string, inviteeID string) error {
+	invite := &ServerInvite{
+		ID:        uuid.New().String(),
+		ServerID:  serverID,
+		InviterID: inviterID,
+		InviteeID: inviteeID,
+	}
+	return s.repository.CreateInvite(ctx, invite)
+}
+
+func (s *Service) FindPendingInvite(ctx context.Context, serverID string, inviteeID string) (*ServerInvite, error) {
+	return s.repository.FindPendingInvite(ctx, serverID, inviteeID)
+}
+
+func (s *Service) ListInvitesByInvitee(ctx context.Context, inviteeID string) ([]ServerInvite, error) {
+	return s.repository.ListInvitesByInvitee(ctx, inviteeID)
+}
+
+func (s *Service) ListInvitesByServer(ctx context.Context, serverID string) ([]ServerInvite, error) {
+	return s.repository.ListInvitesByServer(ctx, serverID)
+}
+
+func (s *Service) AcceptInvite(ctx context.Context, inviteID string, userID string) error {
+	invite, err := s.repository.FindInviteByID(ctx, inviteID)
+	if err != nil {
+		return ErrInviteNotFound
+	}
+
+	if invite.InviteeID != userID {
+		return ErrNotInvitee
+	}
+
+	if invite.Status != "pending" {
+		return ErrInviteNotPending
+	}
+
+	isMember, err := s.repository.IsMember(ctx, invite.ServerID, userID)
+	if err != nil {
+		return err
+	}
+	if isMember {
+		return ErrAlreadyMember
+	}
+
+	member := &ServerMember{}
+	if err := s.repository.AddingUserServer(ctx, &Server{ID: invite.ServerID}, member, userID, "member"); err != nil {
+		return err
+	}
+
+	if err := s.repository.UpdateInviteStatus(ctx, inviteID, "accepted"); err != nil {
+		return err
+	}
+
+	fullMember, err := s.repository.FindMemberByUserID(ctx, invite.ServerID, userID)
+	if err == nil && s.publisher != nil {
+		s.publisher.PublishMemberJoin(MemberJoinEvent{
+			ServerID: invite.ServerID,
+			Member:   *fullMember,
+		})
+	}
+
+	return nil
+}
+
+func (s *Service) DeclineInvite(ctx context.Context, inviteID string, userID string) error {
+	invite, err := s.repository.FindInviteByID(ctx, inviteID)
+	if err != nil {
+		return ErrInviteNotFound
+	}
+
+	if invite.InviteeID != userID {
+		return ErrNotInvitee
+	}
+
+	if invite.Status != "pending" {
+		return ErrInviteNotPending
+	}
+
+	return s.repository.UpdateInviteStatus(ctx, inviteID, "declined")
+}

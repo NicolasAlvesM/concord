@@ -1,0 +1,102 @@
+import { useEffect, useRef } from 'react'
+import type { CallUserInfo } from '../../store/callStore'
+import { MicOffIcon } from '../icons'
+
+function VideoFill({
+  stream,
+  fit,
+  mirror
+}: {
+  stream: MediaStream
+  fit: 'cover' | 'contain'
+  mirror?: boolean
+}): React.JSX.Element {
+  const ref = useRef<HTMLVideoElement | null>(null)
+
+  useEffect(() => {
+    const el = ref.current
+    if (!el) return
+    el.srcObject = stream
+    void el.play().catch(() => {})
+  }, [stream])
+
+  return (
+    <video
+      ref={ref}
+      autoPlay
+      playsInline
+      muted
+      className={`absolute inset-0 h-full w-full rounded-2xl ${
+        fit === 'contain' ? 'bg-black object-contain' : 'object-cover'
+      } ${mirror ? '-scale-x-100' : ''}`}
+    />
+  )
+}
+
+function ParticipantTile({
+  user,
+  speaking = false,
+  selfMuted = false,
+  videoStream = null,
+  size = 'lg',
+  isScreen = false,
+  mirror = false,
+  onClick
+}: {
+  user: CallUserInfo
+  speaking?: boolean
+  selfMuted?: boolean
+  /** Stream de vídeo (tela/câmera) exibido dentro do tile. */
+  videoStream?: MediaStream | null
+  size?: 'md' | 'lg' | 'fill'
+  /** Modo compartilhamento de tela: object-contain + destaque verde + AO VIVO. */
+  isScreen?: boolean
+  /** Espelha o vídeo (câmera local). */
+  mirror?: boolean
+  onClick?: () => void
+}): React.JSX.Element {
+  const initial = user.display_name.charAt(0).toUpperCase()
+  const dims =
+    size === 'fill' ? 'h-full w-full min-h-[240px]' : size === 'lg' ? 'h-48 w-80' : 'h-28 w-44'
+  const avatarDims = size === 'lg' ? 'h-24 w-24 text-3xl' : 'h-14 w-14 text-lg'
+
+  return (
+    <div
+      onClick={onClick}
+      role={onClick ? 'button' : undefined}
+      title={onClick && isScreen ? 'Expandir tela' : undefined}
+      className={`relative flex items-center justify-center overflow-hidden rounded-2xl bg-white/[0.04] transition-all ${dims} ${
+        isScreen
+          ? 'ring-2 ring-[#23a55a] shadow-[0_0_24px_rgba(35,165,90,0.25)]'
+          : speaking
+            ? 'ring-2 ring-[#23a55a] shadow-[0_0_24px_rgba(35,165,90,0.25)]'
+            : 'ring-1 ring-white/6'
+      } ${onClick ? 'cursor-pointer hover:brightness-110' : ''}`}
+    >
+      {videoStream && (
+        <VideoFill stream={videoStream} fit={isScreen ? 'contain' : 'cover'} mirror={mirror} />
+      )}
+      {!videoStream && (
+        <div
+          className={`flex items-center justify-center rounded-full font-bold text-white transition-colors ${avatarDims} ${
+            speaking ? 'bg-[#23a55a]' : 'bg-violet-600'
+          }`}
+        >
+          {initial}
+        </div>
+      )}
+      {isScreen && (
+        <div className="absolute right-2 top-2 flex items-center gap-1.5 rounded-md bg-[#f23f43] px-1.5 py-0.5">
+          <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-white" />
+          <span className="text-[10px] font-bold uppercase tracking-wide text-white">Ao vivo</span>
+        </div>
+      )}
+      <div className="absolute bottom-2 left-2 flex max-w-[calc(100%-1rem)] items-center gap-1.5 rounded-md bg-black/60 px-2 py-1 backdrop-blur-sm">
+        {selfMuted && <MicOffIcon className="h-3 w-3 shrink-0 text-red-400" />}
+        <span className="truncate text-xs font-semibold text-white">{user.display_name}</span>
+      </div>
+    </div>
+  )
+}
+
+export default ParticipantTile

@@ -1,0 +1,158 @@
+import { useEffect, useState } from 'react'
+import { useParams } from 'react-router-dom'
+import { useAuthStore } from '../store/authStore'
+import { useFriendStore } from '../store/friendStore'
+import { useChatStore } from '../store/chatStore'
+import { useCallStore } from '../store/callStore'
+import { getOrCreateConversationWith } from '../api/conversations'
+import { showToast } from '../store/toastStore'
+import ChatPane from '../components/ChatPane'
+import DmCallView from '../components/call/DmCallView'
+import { PhoneIcon, PhoneOffIcon } from '../components/icons'
+
+function DmChat(): React.JSX.Element {
+  const { userId } = useParams<{ userId: string }>()
+  const me = useAuthStore((s) => s.user)
+  const friends = useFriendStore((s) => s.friends)
+  const loadFriends = useFriendStore((s) => s.loadAll)
+  const conversations = useChatStore((s) => s.conversations)
+  const presence = useChatStore((s) => s.presence)
+  const fetchConversations = useChatStore((s) => s.fetchConversations)
+  const callStatus = useCallStore((s) => s.status)
+  const inCallWithUser = useCallStore(
+    (s) => s.status !== 'idle' && s.type === 'dm' && s.participants.some((p) => p.id === userId)
+  )
+  const startDMCall = useCallStore((s) => s.startDMCall)
+  const endCall = useCallStore((s) => s.endCall)
+
+  const [conversationId, setConversationId] = useState<string | null>(null)
+  const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    let cancelled = false
+    if (!userId) return
+
+    const open = async (): Promise<void> => {
+      try {
+        const conv = await getOrCreateConversationWith(userId)
+        if (!cancelled) setConversationId(conv.id)
+      } catch (err) {
+        if (!cancelled) {
+          setError(err instanceof Error ? err.message : 'Falha ao abrir conversa.')
+          showToast.error('Não foi possível abrir a conversa.')
+        }
+      }
+    }
+    open()
+    return () => {
+      cancelled = true
+    }
+  }, [userId])
+
+  useEffect(() => {
+    loadFriends()
+    fetchConversations()
+  }, [loadFriends, fetchConversations])
+
+  const other =
+    friends.find((f) => f.id === userId) ??
+    conversations.find((c) => c.other_user.id === userId)?.other_user
+
+  const otherName =
+    other?.display_name ??
+    other?.username ??
+    (userId === me?.id ? me?.display_name : 'Usuário') ??
+    'Usuário'
+  const otherHandle = other?.username ?? (userId === me?.id ? me?.username : '')
+  const initial = otherName.charAt(0).toUpperCase()
+  const online = Boolean(userId && presence[userId])
+
+  return (
+    <div className="flex h-full w-full flex-col overflow-hidden bg-[#07080b]/90 backdrop-blur-2xl text-gray-100">
+      <header className="flex h-14 shrink-0 items-center gap-3 border-b border-white/6 px-4">
+        <div className="flex items-center gap-2.5 min-w-0">
+          <div className="relative shrink-0">
+            <div className="flex h-8 w-8 items-center justify-center rounded-full bg-violet-600 text-xs font-bold text-white">
+              {initial}
+            </div>
+            <span
+              className={`absolute -right-0.5 -bottom-0.5 h-3 w-3 rounded-full border-2 border-[#07080b] ${
+                online ? 'bg-[#23a55a]' : 'bg-gray-600'
+              }`}
+            />
+          </div>
+          <div className="min-w-0 leading-tight">
+            <p className="truncate text-sm font-bold text-white">{otherName}</p>
+            {otherHandle && <p className="truncate text-[11px] text-gray-400">@{otherHandle}</p>}
+          </div>
+        </div>
+        <span
+          className={`text-[11px] font-semibold ${online ? 'text-[#23a55a]' : 'text-gray-500'}`}
+        >
+          {online ? 'Online' : 'Offline'}
+        </span>
+        <div className="ml-auto">
+          {inCallWithUser ? (
+            <button
+              className="flex h-9 w-9 cursor-pointer items-center justify-center rounded-full bg-[#f23f43] text-white transition-colors hover:bg-[#d83a3e]"
+              onClick={endCall}
+              aria-label="Encerrar chamada"
+              title="Encerrar chamada"
+            >
+              <PhoneOffIcon className="h-[18px] w-[18px]" />
+            </button>
+          ) : (
+            <button
+              className="flex h-9 w-9 cursor-pointer items-center justify-center rounded-full bg-white/5 text-gray-300 transition-colors hover:bg-white/10 hover:text-white disabled:cursor-not-allowed disabled:opacity-40"
+              onClick={() => {
+                if (!conversationId || !userId) return
+                void startDMCall(conversationId, {
+                  id: userId,
+                  username: otherHandle || '',
+                  display_name: otherName
+                })
+              }}
+              disabled={!online || !conversationId || callStatus !== 'idle'}
+              aria-label="Iniciar chamada de voz"
+              title={
+                callStatus !== 'idle'
+                  ? 'Você já está em uma chamada'
+                  : online
+                    ? 'Iniciar chamada de voz'
+                    : 'Usuário offline'
+              }
+            >
+              <PhoneIcon className="h-[18px] w-[18px]" />
+            </button>
+          )}
+        </div>
+      </header>
+
+      {error ? (
+        <div className="flex flex-1 items-center justify-center text-sm text-gray-400">
+          <p>{error}</p>
+        </div>
+      ) : conversationId ? (
+        inCallWithUser ? (
+          <DmCallView>
+            <ChatPane
+              room={`conversation:${conversationId}`}
+              placeholder={`Mensagem para @${otherHandle || otherName}`}
+            />
+          </DmCallView>
+        ) : (
+          <ChatPane
+            room={`conversation:${conversationId}`}
+            placeholder={`Mensagem para @${otherHandle || otherName}`}
+          />
+        )
+      ) : (
+        <div className="flex flex-1 items-center justify-center text-sm text-gray-400">
+          <p>Abrindo conversa...</p>
+        </div>
+      )}
+    </div>
+  )
+}
+
+export default DmChat

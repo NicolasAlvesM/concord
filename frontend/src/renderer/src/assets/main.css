@@ -1,0 +1,153 @@
+@import 'tailwindcss';
+
+@theme {
+  --color-discord-violet: #5865f2;
+  --color-discord-violet-hover: #4752c4;
+  --color-discord-green: #23a55a;
+  --color-discord-green-hover: #1d8a4b;
+  --color-discord-dnd: #f23f43;
+  --color-discord-idle: #f0b232;
+  --color-discord-offline: #80848e;
+
+  --glass-onyx-bg: rgba(9, 10, 15, 0.75);
+  --glass-onyx-deep: rgba(5, 6, 9, 0.88);
+  --glass-onyx-surface: rgba(18, 20, 29, 0.65);
+  --glass-onyx-card: rgba(255, 255, 255, 0.04);
+  --glass-onyx-card-hover: rgba(255, 255, 255, 0.07);
+  --glass-border: rgba(255, 255, 255, 0.08);
+  --glass-border-light: rgba(255, 255, 255, 0.12);
+  --glass-highlight: rgba(139, 92, 246, 0.4);
+
+  --shadow-onyx-glass: 0 8px 32px rgba(0, 0, 0, 0.65);
+  --shadow-onyx-card: 0 4px 20px rgba(0, 0, 0, 0.45);
+}
+
+@layer base {
+  html,
+  body,
+  #root {
+    height: 100%;
+    margin: 0;
+    padding: 0;
+    overflow: hidden;
+    user-select: none;
+  }
+
+  body {
+    font-family:
+      'gg sans',
+      'Noto Sans',
+      'Helvetica Neue',
+      'Segoe UI',
+      'Inter',
+      sans-serif;
+    color: #f2f3f5;
+    background: #050508;
+  }
+
+  /* Custom Thin Onyx Scrollbar */
+  ::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.15);
+    border-radius: 9999px;
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    background: rgba(255, 255, 255, 0.28);
+  }
+}
+
+@layer components {
+  .glass-panel {
+    background: var(--glass-onyx-bg);
+    border: 1px solid var(--glass-border);
+    backdrop-filter: blur(24px) saturate(160%);
+    -webkit-backdrop-filter: blur(24px) saturate(160%);
+    box-shadow: var(--shadow-onyx-glass);
+  }
+
+  .glass-card {
+    background: var(--glass-onyx-card);
+    border: 1px solid var(--glass-border);
+    backdrop-filter: blur(20px) saturate(150%);
+    -webkit-backdrop-filter: blur(20px) saturate(150%);
+    border-radius: 1rem;
+    box-shadow: var(--shadow-onyx-card);
+    transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+
+  .glass-card:hover {
+    background: var(--glass-onyx-card-hover);
+    border-color: var(--glass-border-light);
+  }
+
+  .glass-input {
+    width: 100%;
+    padding: 0.625rem 1rem;
+    background: rgba(0, 0, 0, 0.5);
+    border: 1px solid var(--glass-border);
+    border-radius: 0.75rem;
+    color: #f2f3f5;
+    outline: none;
+    backdrop-filter: blur(12px);
+    transition:
+      border-color 0.15s ease,
+      box-shadow 0.15s ease,
+      background-color 0.15s ease;
+  }
+
+  .glass-input::placeholder {
+    color: rgba(242, 243, 245, 0.35);
+  }
+
+  .glass-input:focus {
+    background: rgba(0, 0, 0, 0.7);
+    border-color: rgba(139, 92, 246, 0.6);
+    box-shadow: 0 0 0 3px rgba(139, 92, 246, 0.2);
+  }
+
+  .badge-novo {
+    font-size: 0.625rem;
+    font-weight: 700;
+    line-height: 1;
+    padding: 0.15rem 0.35rem;
+    border-radius: 0.375rem;
+    background: linear-gradient(135deg, #f43f5e, #e11d48);
+    color: #ffffff;
+    letter-spacing: 0.05em;
+    box-shadow: 0 2px 8px rgba(244, 63, 94, 0.4);
+  }
+}
+
+@keyframes blob-float {
+  0%,
+  100% {
+    transform: translate(0, 0) scale(1);
+  }
+  33% {
+    transform: translate(45px, -60px) scale(1.12);
+  }
+  66% {
+    transform: translate(-35px, 35px) scale(0.92);
+  }
+}
+
+.animate-blob {
+  animation: blob-float 22s ease-in-out infinite;
+}
+
+.animate-blob-slow {
+  animation: blob-float 32s ease-in-out infinite reverse;
+}
+
+.animate-blob-fast {
+  animation: blob-float 16s ease-in-out infinite;
+}

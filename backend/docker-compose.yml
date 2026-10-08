@@ -1,0 +1,19 @@
+services:
+  postgres:
+    image: postgres:17
+    container_name: concord-postgres
+    restart: unless-stopped
+
+    environment:
+      POSTGRES_USER: concord-user
+      POSTGRES_PASSWORD: concord-password
+      POSTGRES_DB: concord
+
+    ports:
+      - "5432:5432"
+
+    volumes:
+      - concord_postgres_data:/var/lib/postgresql/data
+
+volumes:
+  concord_postgres_data:

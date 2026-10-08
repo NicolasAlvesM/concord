@@ -1,0 +1,208 @@
+package user
+
+import (
+	"context"
+
+	"github.com/jackc/pgx/v5/pgxpool"
+)
+
+type Repository struct {
+	db *pgxpool.Pool
+}
+
+func UserRepository(db *pgxpool.Pool) *Repository {
+	return &Repository{
+		db: db,
+	}
+}
+
+func (r *Repository) FindByEmail(ctx context.Context, email string) (*User, error) {
+	user := &User{}
+	err := r.db.QueryRow(
+		ctx,
+		`
+		SELECT
+			id,
+			username,
+			display_name,
+			email,
+			password_hash,
+			avatar_url,
+			active,
+			created_at,
+			updated_at
+		FROM users
+		WHERE email = $1
+		`,
+		email,
+	).Scan(
+		&user.ID,
+		&user.Username,
+		&user.DisplayName,
+		&user.Email,
+		&user.PasswordHash,
+		&user.AvatarURL,
+		&user.Active,
+		&user.CreatedAt,
+		&user.UpdatedAt,
+	)
+	if err != nil {
+		return nil, err
+	}
+	return user, nil
+}
+
+func (r *Repository) FindByID(ctx context.Context, id string) (*User, error) {
+	user := &User{}
+	err := r.db.QueryRow(
+		ctx,
+		`
+		SELECT
+			id,
+			username,
+			display_name,
+			email,
+			password_hash,
+			avatar_url,
+			active,
+			created_at,
+			updated_at
+		FROM users
+		WHERE id = $1
+		`,
+		id,
+	).Scan(
+		&user.ID,
+		&user.Username,
+		&user.DisplayName,
+		&user.Email,
+		&user.PasswordHash,
+		&user.AvatarURL,
+		&user.Active,
+		&user.CreatedAt,
+		&user.UpdatedAt,
+	)
+	if err != nil {
+		return nil, err
+	}
+	return user, nil
+}
+
+func (r *Repository) FindByUsername(ctx context.Context, username string) (*User, error) {
+	user := &User{}
+	err := r.db.QueryRow(
+		ctx,
+		`
+		SELECT
+			id,
+			username,
+			display_name,
+			email,
+			password_hash,
+			avatar_url,
+			active,
+			created_at,
+			updated_at
+		FROM users
+		WHERE username = $1
+		`,
+		username,
+	).Scan(
+		&user.ID,
+		&user.Username,
+		&user.DisplayName,
+		&user.Email,
+		&user.PasswordHash,
+		&user.AvatarURL,
+		&user.Active,
+		&user.CreatedAt,
+		&user.UpdatedAt,
+	)
+	if err != nil {
+		return nil, err
+	}
+	return user, nil
+}
+
+func (r *Repository) SearchByUsername(ctx context.Context, query string, excludeUserID string) ([]User, error) {
+	rows, err := r.db.Query(
+		ctx,
+		`
+		SELECT
+			id,
+			username,
+			display_name,
+			email,
+			avatar_url,
+			created_at,
+			updated_at
+		FROM users
+		WHERE username ILIKE '%' || $1 || '%'
+		AND id <> $2
+		LIMIT 20
+		`,
+		query,
+		excludeUserID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var users []User
+	for rows.Next() {
+		var u User
+		if err := rows.Scan(
+			&u.ID,
+			&u.Username,
+			&u.DisplayName,
+			&u.Email,
+			&u.AvatarURL,
+			&u.CreatedAt,
+			&u.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		users = append(users, u)
+	}
+
+	if users == nil {
+		users = []User{}
+	}
+
+	return users, nil
+}
+
+func (r *Repository) Create(
+	ctx context.Context,
+	user *User,
+) error {
+	return r.db.QueryRow(
+		ctx,
+		`
+		INSERT INTO users (
+			id,
+			username,
+			display_name,
+			email,
+			password_hash,
+			avatar_url
+		)
+		VALUES ($1, $2, $3, $4, $5, $6)
+		RETURNING
+			active,
+			created_at,
+			updated_at
+		`,
+		user.ID,
+		user.Username,
+		user.DisplayName,
+		user.Email,
+		user.PasswordHash,
+		user.AvatarURL,
+	).Scan(
+		&user.Active,
+		&user.CreatedAt,
+		&user.UpdatedAt,
+	)
+}

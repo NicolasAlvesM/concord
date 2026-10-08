@@ -1,0 +1,3 @@
+ALTER TABLE channels DROP CONSTRAINT IF EXISTS channels_type_check;
+
+ALTER TABLE channels DROP COLUMN IF EXISTS type;

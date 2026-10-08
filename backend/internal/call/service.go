@@ -1,0 +1,801 @@
+package call
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"log"
+	"sync"
+	"time"
+
+	"gin-quickstart/backend/internal/channel"
+	"gin-quickstart/backend/internal/conversation"
+	"gin-quickstart/backend/internal/server"
+	"gin-quickstart/backend/internal/user"
+
+	"github.com/google/uuid"
+)
+
+var (
+	ErrNotFound       = errors.New("call not found")
+	ErrBusy           = errors.New("user is busy in another call")
+	ErrCalleeOffline  = errors.New("callee is offline")
+	ErrNotParticipant = errors.New("you are not a participant of this conversation")
+	ErrNotMember      = errors.New("you are not a member of this server")
+	ErrNotAllowed     = errors.New("not allowed")
+	ErrInvalidType    = errors.New("invalid call type")
+)
+
+type EventPublisher interface {
+	SendToUser(userID string, event []byte)
+	BroadcastToCall(callID string, event []byte)
+}
+
+type ParticipantInfo struct {
+	UserInfo
+	CallID   string    `json:"call_id"`
+	UserID   string    `json:"user_id"`
+	Role     string    `json:"role"`
+	JoinedAt time.Time `json:"joined_at"`
+}
+
+type StateResponse struct {
+	Call          *Call             `json:"call"`
+	Participants  []ParticipantInfo `json:"participants"`
+	ScreenSharing []string          `json:"screen_sharing,omitempty"`
+}
+
+type participantState struct {
+	userID   string
+	role     string
+	joinedAt time.Time
+}
+
+type activeCall struct {
+	info         *Call
+	participants map[string]*participantState
+	inviteeID    string
+}
+
+type Service struct {
+	repository          *Repository
+	publisher           EventPublisher
+	conversationService *conversation.Service
+	serverService       *server.Service
+	channelService      *channel.Service
+	userService         *user.Service
+	isOnline            func(userID string) bool
+
+	mu    sync.RWMutex
+	calls map[string]*activeCall
+	busy  map[string]string
+	// screenSharers: callID -> set de userIDs compartilhando tela (transitório)
+	screenSharers map[string]map[string]struct{}
+}
+
+func CallService(
+	repository *Repository,
+	publisher EventPublisher,
+	conversationService *conversation.Service,
+	serverService *server.Service,
+	channelService *channel.Service,
+	userService *user.Service,
+	isOnline func(userID string) bool,
+) *Service {
+	return &Service{
+		repository:          repository,
+		publisher:           publisher,
+		conversationService: conversationService,
+		serverService:       serverService,
+		channelService:      channelService,
+		userService:         userService,
+		isOnline:            isOnline,
+		calls:               make(map[string]*activeCall),
+		busy:                make(map[string]string),
+		screenSharers:       make(map[string]map[string]struct{}),
+	}
+}
+
+func (s *Service) StartDM(ctx context.Context, initiatorID string, conversationID string) (*Call, error) {
+	conv, err := s.conversationService.FindByID(ctx, conversationID)
+	if err != nil {
+		return nil, ErrNotFound
+	}
+
+	if conv.UserAID != initiatorID && conv.UserBID != initiatorID {
+		return nil, ErrNotParticipant
+	}
+
+	calleeID := conv.UserAID
+	if initiatorID == conv.UserAID {
+		calleeID = conv.UserBID
+	}
+
+	if s.isOnline != nil && !s.isOnline(calleeID) {
+		return nil, ErrCalleeOffline
+	}
+
+	s.mu.Lock()
+	if callID, ok := s.busy[initiatorID]; ok {
+		existing := s.calls[callID]
+		if existing != nil && existing.info.ConversationID != nil && *existing.info.ConversationID == conversationID {
+			info := existing.info
+			s.mu.Unlock()
+			return info, nil
+		}
+		s.mu.Unlock()
+		return nil, ErrBusy
+	}
+	if _, ok := s.busy[calleeID]; ok {
+		s.mu.Unlock()
+		return nil, ErrBusy
+	}
+	if existing := s.findActiveByScopeLocked(TypeDM, conversationID); existing != nil {
+		ac := existing
+		s.mu.Unlock()
+		return ac.info, nil
+	}
+
+	initiatorInfo, err := s.userInfo(ctx, initiatorID)
+	if err != nil {
+		s.mu.Unlock()
+		return nil, err
+	}
+	calleeInfo, err := s.userInfo(ctx, calleeID)
+	if err != nil {
+		s.mu.Unlock()
+		return nil, err
+	}
+
+	call := &Call{
+		ID:             uuid.New().String(),
+		Type:           TypeDM,
+		ConversationID: &conv.ID,
+		InitiatorID:    initiatorID,
+		Status:         StatusRinging,
+	}
+	ac := &activeCall{
+		info:         call,
+		participants: make(map[string]*participantState),
+		inviteeID:    calleeID,
+	}
+	ac.participants[initiatorID] = &participantState{
+		userID:   initiatorID,
+		role:     RoleMember,
+		joinedAt: time.Now(),
+	}
+	s.calls[call.ID] = ac
+	s.busy[initiatorID] = call.ID
+	s.mu.Unlock()
+
+	if err := s.repository.Create(ctx, call); err != nil {
+		log.Printf("[call] persist call %s failed: %v", call.ID, err)
+	}
+	if err := s.repository.AddParticipant(ctx, &CallParticipant{
+		CallID: call.ID,
+		UserID: initiatorID,
+		Role:   RoleMember,
+	}); err != nil {
+		log.Printf("[call] persist participant %s failed: %v", initiatorID, err)
+	}
+
+	s.publisher.SendToUser(calleeID, marshalEvent("call:invite", InviteEvent{
+		CallID:         call.ID,
+		Type:           call.Type,
+		Initiator:      initiatorInfo,
+		ConversationID: call.ConversationID,
+	}))
+	s.publisher.SendToUser(initiatorID, marshalEvent("call:ring", RingEvent{
+		CallID: call.ID,
+		Callee: calleeInfo,
+	}))
+
+	return call, nil
+}
+
+func (s *Service) StartChannel(ctx context.Context, initiatorID string, channelID string) (*Call, error) {
+	ch, err := s.channelService.FindByID(ctx, channelID)
+	if err != nil {
+		return nil, ErrNotFound
+	}
+
+	isMember, err := s.serverService.IsMember(ctx, ch.ServerID, initiatorID)
+	if err != nil || !isMember {
+		return nil, ErrNotMember
+	}
+
+	s.mu.Lock()
+	if callID, ok := s.busy[initiatorID]; ok {
+		existing := s.calls[callID]
+		if existing != nil && existing.info.ChannelID != nil && *existing.info.ChannelID == channelID {
+			s.mu.Unlock()
+			return existing.info, nil
+		}
+		s.mu.Unlock()
+		return nil, ErrBusy
+	}
+	if existing := s.findActiveByScopeLocked(TypeChannel, channelID); existing != nil {
+		ac := existing
+		s.mu.Unlock()
+		return s.joinLocked(ctx, ac, initiatorID, RoleMember)
+	}
+
+	call := &Call{
+		ID:          uuid.New().String(),
+		Type:        TypeChannel,
+		ChannelID:   &ch.ID,
+		ServerID:    &ch.ServerID,
+		InitiatorID: initiatorID,
+		Status:      StatusActive,
+	}
+	ac := &activeCall{
+		info:         call,
+		participants: make(map[string]*participantState),
+	}
+	s.calls[call.ID] = ac
+	s.mu.Unlock()
+
+	if err := s.repository.Create(ctx, call); err != nil {
+		log.Printf("[call] persist call %s failed: %v", call.ID, err)
+	}
+
+	_, err = s.joinLocked(ctx, ac, initiatorID, RoleMember)
+	if err != nil {
+		return nil, err
+	}
+
+	return call, nil
+}
+
+func (s *Service) Accept(ctx context.Context, callID string, userID string) error {
+	s.mu.Lock()
+	ac, ok := s.calls[callID]
+	if !ok || ac.info.Status == StatusEnded {
+		s.mu.Unlock()
+		return ErrNotFound
+	}
+	if ac.info.Type == TypeDM && ac.inviteeID != userID {
+		s.mu.Unlock()
+		return ErrNotAllowed
+	}
+	if _, ok := ac.participants[userID]; ok {
+		s.mu.Unlock()
+		return nil
+	}
+	if otherID, ok := s.busy[userID]; ok && otherID != callID {
+		s.mu.Unlock()
+		return ErrBusy
+	}
+
+	userInfo, err := s.userInfo(ctx, userID)
+	if err != nil {
+		s.mu.Unlock()
+		return err
+	}
+
+	now := time.Now()
+	ac.participants[userID] = &participantState{
+		userID:   userID,
+		role:     RoleMember,
+		joinedAt: now,
+	}
+	ac.info.Status = StatusActive
+	s.busy[userID] = callID
+	callIDCopy := ac.info.ID
+	s.mu.Unlock()
+
+	if err := s.repository.AddParticipant(ctx, &CallParticipant{
+		CallID: callID,
+		UserID: userID,
+		Role:   RoleMember,
+	}); err != nil {
+		log.Printf("[call] persist participant %s failed: %v", userID, err)
+	}
+
+	s.publisher.BroadcastToCall(callIDCopy, marshalEvent("call:accept", ResponseEvent{
+		CallID: callIDCopy,
+		User:   userInfo,
+	}))
+
+	return nil
+}
+
+func (s *Service) Decline(ctx context.Context, callID string, userID string) error {
+	s.mu.Lock()
+	ac, ok := s.calls[callID]
+	if !ok || ac.info.Status == StatusEnded {
+		s.mu.Unlock()
+		return ErrNotFound
+	}
+	if ac.info.Type == TypeDM && ac.inviteeID != userID {
+		s.mu.Unlock()
+		return ErrNotAllowed
+	}
+
+	userInfo, err := s.userInfo(ctx, userID)
+	if err != nil {
+		s.mu.Unlock()
+		return err
+	}
+	initiatorID := ac.info.InitiatorID
+	s.mu.Unlock()
+
+	s.publisher.SendToUser(initiatorID, marshalEvent("call:decline", ResponseEvent{
+		CallID: callID,
+		User:   userInfo,
+	}))
+
+	return s.End(ctx, callID)
+}
+
+func (s *Service) Join(ctx context.Context, callID string, userID string) error {
+	s.mu.Lock()
+	ac, ok := s.calls[callID]
+	if !ok || ac.info.Status == StatusEnded {
+		s.mu.Unlock()
+		return ErrNotFound
+	}
+	isChannel := ac.info.Type == TypeChannel
+	var serverID string
+	if isChannel && ac.info.ServerID != nil {
+		serverID = *ac.info.ServerID
+	}
+	s.mu.Unlock()
+
+	if isChannel {
+		isMember, err := s.serverService.IsMember(ctx, serverID, userID)
+		if err != nil || !isMember {
+			return ErrNotMember
+		}
+	}
+
+	s.mu.Lock()
+	_, err := s.joinLocked(ctx, ac, userID, RoleMember)
+	s.mu.Unlock()
+	return err
+}
+
+func (s *Service) Leave(ctx context.Context, callID string, userID string) error {
+	s.mu.Lock()
+	ac, ok := s.calls[callID]
+	if !ok {
+		s.mu.Unlock()
+		return ErrNotFound
+	}
+	if _, ok := ac.participants[userID]; !ok {
+		s.mu.Unlock()
+		return nil
+	}
+	delete(ac.participants, userID)
+	delete(s.busy, userID)
+	if sharers, ok := s.screenSharers[callID]; ok {
+		delete(sharers, userID)
+	}
+	remaining := len(ac.participants)
+	s.mu.Unlock()
+
+	if err := s.repository.MarkParticipantLeft(ctx, callID, userID); err != nil {
+		log.Printf("[call] persist leave %s failed: %v", userID, err)
+	}
+
+	userInfo, err := s.userInfo(ctx, userID)
+	if err == nil {
+		s.publisher.BroadcastToCall(callID, marshalEvent("call:left", StateEvent{
+			CallID: callID,
+			User:   userInfo,
+		}))
+	}
+
+	if remaining == 0 {
+		return s.End(ctx, callID)
+	}
+
+	return nil
+}
+
+func (s *Service) End(ctx context.Context, callID string) error {
+	s.mu.Lock()
+	ac, ok := s.calls[callID]
+	if !ok {
+		s.mu.Unlock()
+		return ErrNotFound
+	}
+	for pid := range ac.participants {
+		delete(s.busy, pid)
+	}
+	delete(s.calls, callID)
+	delete(s.screenSharers, callID)
+	s.mu.Unlock()
+
+	if err := s.repository.EndCall(ctx, callID); err != nil {
+		log.Printf("[call] persist end %s failed: %v", callID, err)
+	}
+
+	s.publisher.BroadcastToCall(callID, marshalEvent("call:ended", EndedEvent{
+		CallID: callID,
+	}))
+
+	return nil
+}
+
+func (s *Service) EndByUser(ctx context.Context, callID string, userID string) error {
+	s.mu.RLock()
+	_, ok := s.calls[callID]
+	var isParticipant bool
+	if ok {
+		_, isParticipant = s.calls[callID].participants[userID]
+	}
+	s.mu.RUnlock()
+	if !ok {
+		return ErrNotFound
+	}
+	if !isParticipant {
+		return ErrNotAllowed
+	}
+	return s.End(ctx, callID)
+}
+
+func (s *Service) Signal(_ context.Context, fromUserID string, payload SignalPayload) error {
+	s.mu.RLock()
+	ac, ok := s.calls[payload.CallID]
+	if !ok || ac.info.Status == StatusEnded {
+		s.mu.RUnlock()
+		return ErrNotFound
+	}
+	if _, ok := ac.participants[fromUserID]; !ok {
+		s.mu.RUnlock()
+		return ErrNotAllowed
+	}
+
+	relay := SignalRelayEvent{
+		CallID:     payload.CallID,
+		FromUserID: fromUserID,
+		SDP:        payload.SDP,
+		Candidate:  payload.Candidate,
+		Media:      payload.Media,
+	}
+
+	if payload.ToUserID != "" {
+		if _, ok := ac.participants[payload.ToUserID]; !ok {
+			s.mu.RUnlock()
+			return ErrNotAllowed
+		}
+		s.mu.RUnlock()
+		s.publisher.SendToUser(payload.ToUserID, marshalEvent("call:signal", relay))
+		return nil
+	}
+
+	targets := make([]string, 0, len(ac.participants))
+	for pid := range ac.participants {
+		if pid != fromUserID {
+			targets = append(targets, pid)
+		}
+	}
+	s.mu.RUnlock()
+
+	for _, pid := range targets {
+		s.publisher.SendToUser(pid, marshalEvent("call:signal", relay))
+	}
+
+	return nil
+}
+
+// SetScreenShare marca/desmarca um participante como compartilhando tela e
+// publica call:screen para os demais participantes da chamada.
+func (s *Service) SetScreenShare(ctx context.Context, callID string, userID string, active bool) error {
+	s.mu.Lock()
+	ac, ok := s.calls[callID]
+	if !ok || ac.info.Status == StatusEnded {
+		s.mu.Unlock()
+		return ErrNotFound
+	}
+	if _, ok := ac.participants[userID]; !ok {
+		s.mu.Unlock()
+		return ErrNotAllowed
+	}
+
+	sharers, ok := s.screenSharers[callID]
+	if !ok {
+		sharers = make(map[string]struct{})
+		s.screenSharers[callID] = sharers
+	}
+	if active {
+		sharers[userID] = struct{}{}
+	} else {
+		delete(sharers, userID)
+	}
+
+	targets := make([]string, 0, len(ac.participants))
+	for pid := range ac.participants {
+		if pid != userID {
+			targets = append(targets, pid)
+		}
+	}
+	s.mu.Unlock()
+
+	userInfo, err := s.userInfo(ctx, userID)
+	if err != nil {
+		return err
+	}
+
+	for _, pid := range targets {
+		s.publisher.SendToUser(pid, marshalEvent("call:screen", ScreenEvent{
+			CallID: callID,
+			User:   userInfo,
+			Active: active,
+		}))
+	}
+	return nil
+}
+
+func (s *Service) IsBusy(userID string) bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	_, ok := s.busy[userID]
+	return ok
+}
+
+func (s *Service) IsParticipant(callID string, userID string) bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	ac, ok := s.calls[callID]
+	if !ok {
+		return false
+	}
+	_, ok = ac.participants[userID]
+	return ok
+}
+
+func (s *Service) FindActiveByScope(scope string, scopeID string) (*Call, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	ac := s.findActiveByScopeLocked(scope, scopeID)
+	if ac == nil {
+		return nil, ErrNotFound
+	}
+	return ac.info, nil
+}
+
+// ListActiveByServer retorna o estado de todas as chamadas de canal
+// ativas em um servidor (para listar conectados nos canais de voz).
+func (s *Service) ListActiveByServer(ctx context.Context, serverID string) ([]*StateResponse, error) {
+	s.mu.RLock()
+	callIDs := make([]string, 0)
+	for id, ac := range s.calls {
+		if ac.info.Type == TypeChannel && ac.info.ServerID != nil &&
+			*ac.info.ServerID == serverID && ac.info.Status != StatusEnded {
+			callIDs = append(callIDs, id)
+		}
+	}
+	s.mu.RUnlock()
+
+	states := make([]*StateResponse, 0, len(callIDs))
+	for _, id := range callIDs {
+		state, err := s.GetState(ctx, id)
+		if err != nil {
+			continue
+		}
+		states = append(states, state)
+	}
+	return states, nil
+}
+
+func (s *Service) GetState(ctx context.Context, callID string) (*StateResponse, error) {
+	s.mu.RLock()
+	ac, ok := s.calls[callID]
+	if !ok {
+		s.mu.RUnlock()
+		return nil, ErrNotFound
+	}
+
+	participants := make([]ParticipantInfo, 0, len(ac.participants))
+	for _, p := range ac.participants {
+		participants = append(participants, ParticipantInfo{
+			CallID:   callID,
+			UserID:   p.userID,
+			Role:     p.role,
+			JoinedAt: p.joinedAt,
+		})
+	}
+	callCopy := *ac.info
+	screenSharing := make([]string, 0)
+	if sharers, ok := s.screenSharers[callID]; ok {
+		for uid := range sharers {
+			screenSharing = append(screenSharing, uid)
+		}
+	}
+	s.mu.RUnlock()
+
+	for i := range participants {
+		info, err := s.userInfo(ctx, participants[i].UserID)
+		if err != nil {
+			continue
+		}
+		participants[i].UserInfo = info
+	}
+
+	return &StateResponse{
+		Call:          &callCopy,
+		Participants:  participants,
+		ScreenSharing: screenSharing,
+	}, nil
+}
+
+func (s *Service) HandleDisconnect(userID string) {
+	ctx := context.Background()
+
+	s.mu.RLock()
+	callIDs := make([]string, 0)
+	for id, ac := range s.calls {
+		if _, ok := ac.participants[userID]; ok {
+			callIDs = append(callIDs, id)
+		}
+	}
+	s.mu.RUnlock()
+
+	for _, callID := range callIDs {
+		if err := s.Leave(ctx, callID, userID); err != nil {
+			log.Printf("[call] disconnect leave %s failed: %v", userID, err)
+		}
+	}
+}
+
+func (s *Service) HandleCallMessage(userID string, evType string, payload json.RawMessage) {
+	ctx := context.Background()
+
+	switch evType {
+	case "call:invite":
+		var p InvitePayload
+		if err := json.Unmarshal(payload, &p); err != nil {
+			s.sendError(userID, "", "invalid call:invite payload")
+			return
+		}
+		switch p.Type {
+		case TypeDM:
+			if _, err := s.StartDM(ctx, userID, p.ConversationID); err != nil {
+				s.handleStartError(userID, "", err)
+			}
+		case TypeChannel:
+			if _, err := s.StartChannel(ctx, userID, p.ChannelID); err != nil {
+				s.handleStartError(userID, "", err)
+			}
+		default:
+			s.sendError(userID, "", ErrInvalidType.Error())
+		}
+	case "call:accept":
+		var p LeavePayload
+		if err := json.Unmarshal(payload, &p); err != nil || p.CallID == "" {
+			s.sendError(userID, "", "invalid call:accept payload")
+			return
+		}
+		if err := s.Accept(ctx, p.CallID, userID); err != nil {
+			s.sendError(userID, p.CallID, err.Error())
+		}
+	case "call:decline":
+		var p LeavePayload
+		if err := json.Unmarshal(payload, &p); err != nil || p.CallID == "" {
+			s.sendError(userID, "", "invalid call:decline payload")
+			return
+		}
+		if err := s.Decline(ctx, p.CallID, userID); err != nil {
+			s.sendError(userID, p.CallID, err.Error())
+		}
+	case "call:signal":
+		var p SignalPayload
+		if err := json.Unmarshal(payload, &p); err != nil || p.CallID == "" {
+			s.sendError(userID, "", "invalid call:signal payload")
+			return
+		}
+		if err := s.Signal(ctx, userID, p); err != nil {
+			s.sendError(userID, p.CallID, err.Error())
+		}
+	case "call:leave":
+		var p LeavePayload
+		if err := json.Unmarshal(payload, &p); err != nil || p.CallID == "" {
+			s.sendError(userID, "", "invalid call:leave payload")
+			return
+		}
+		if err := s.Leave(ctx, p.CallID, userID); err != nil {
+			s.sendError(userID, p.CallID, err.Error())
+		}
+	case "call:screen":
+		var p ScreenPayload
+		if err := json.Unmarshal(payload, &p); err != nil || p.CallID == "" {
+			s.sendError(userID, "", "invalid call:screen payload")
+			return
+		}
+		if err := s.SetScreenShare(ctx, p.CallID, userID, p.Active); err != nil {
+			s.sendError(userID, p.CallID, err.Error())
+		}
+	default:
+		log.Printf("[call] unhandled ws event %q from user %s", evType, userID)
+	}
+}
+
+func (s *Service) joinLocked(ctx context.Context, ac *activeCall, userID string, role string) (*Call, error) {
+	if ac.info.Status == StatusEnded {
+		return nil, ErrNotFound
+	}
+	if _, ok := ac.participants[userID]; ok {
+		return ac.info, nil
+	}
+	if otherID, ok := s.busy[userID]; ok && otherID != ac.info.ID {
+		return nil, ErrBusy
+	}
+
+	userInfo, err := s.userInfo(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+
+	now := time.Now()
+	ac.participants[userID] = &participantState{
+		userID:   userID,
+		role:     role,
+		joinedAt: now,
+	}
+	ac.info.Status = StatusActive
+	s.busy[userID] = ac.info.ID
+
+	if err := s.repository.AddParticipant(ctx, &CallParticipant{
+		CallID: ac.info.ID,
+		UserID: userID,
+		Role:   role,
+	}); err != nil {
+		log.Printf("[call] persist participant %s failed: %v", userID, err)
+	}
+
+	s.publisher.BroadcastToCall(ac.info.ID, marshalEvent("call:joined", StateEvent{
+		CallID: ac.info.ID,
+		User:   userInfo,
+	}))
+
+	return ac.info, nil
+}
+
+func (s *Service) findActiveByScopeLocked(scope string, scopeID string) *activeCall {
+	for _, ac := range s.calls {
+		if ac.info.Status == StatusEnded {
+			continue
+		}
+		switch scope {
+		case TypeDM:
+			if ac.info.ConversationID != nil && *ac.info.ConversationID == scopeID {
+				return ac
+			}
+		case TypeChannel:
+			if ac.info.ChannelID != nil && *ac.info.ChannelID == scopeID {
+				return ac
+			}
+		}
+	}
+	return nil
+}
+
+func (s *Service) userInfo(ctx context.Context, userID string) (UserInfo, error) {
+	u, err := s.userService.FindByID(ctx, userID)
+	if err != nil {
+		return UserInfo{}, err
+	}
+	return UserInfo{
+		ID:          u.ID,
+		Username:    u.Username,
+		DisplayName: u.DisplayName,
+		AvatarURL:   u.AvatarURL,
+	}, nil
+}
+
+func (s *Service) sendError(userID string, callID string, message string) {
+	s.publisher.SendToUser(userID, marshalEvent("call:error", ErrorEvent{
+		CallID:  callID,
+		Message: message,
+	}))
+}
+
+func (s *Service) handleStartError(userID string, callID string, err error) {
+	if errors.Is(err, ErrBusy) {
+		s.publisher.SendToUser(userID, marshalEvent("call:busy", BusyEvent{CallID: callID}))
+		return
+	}
+	s.sendError(userID, callID, err.Error())
+}

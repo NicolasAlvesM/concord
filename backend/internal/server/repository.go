@@ -1,0 +1,501 @@
+package server
+
+import (
+	"context"
+
+	"github.com/jackc/pgx/v5/pgxpool"
+)
+
+type Repository struct {
+	db *pgxpool.Pool
+}
+
+func ServerRepository(db *pgxpool.Pool) *Repository {
+	return &Repository{
+		db: db,
+	}
+}
+
+func (r *Repository) Create(
+	ctx context.Context,
+	server *Server,
+) error {
+	return r.db.QueryRow(
+		ctx,
+		`
+		INSERT INTO servers (
+			id,
+			name,
+			icon_url,
+			owner_id
+		)
+		VALUES ($1, $2, $3, $4)
+		RETURNING
+			id,
+			name,
+			icon_url,
+			owner_id,
+			created_at,
+			updated_at
+		`,
+		server.ID,
+		server.Name,
+		server.IconURL,
+		server.OwnerID,
+	).Scan(
+		&server.ID,
+		&server.Name,
+		&server.IconURL,
+		&server.OwnerID,
+		&server.CreatedAt,
+		&server.UpdatedAt,
+	)
+}
+
+func (r *Repository) AddingUserServer(
+	ctx context.Context,
+	server *Server,
+	serverMember *ServerMember,
+	userID string,
+	role string,
+) error {
+	return r.db.QueryRow(
+		ctx,
+		`
+		INSERT INTO server_members (
+			server_id,
+			user_id,
+			role
+		)
+		VALUES ($1, $2, $3)
+		RETURNING
+			server_id,
+			user_id,
+			role,
+			joined_at,
+			updated_at
+		`,
+		server.ID,
+		userID,
+		role,
+	).Scan(
+		&serverMember.ServerID,
+		&serverMember.UserID,
+		&serverMember.Role,
+		&serverMember.JoinedAt,
+		&serverMember.UpdatedAt,
+	)
+}
+
+func (r *Repository) FindByID(ctx context.Context, id string) (*Server, error) {
+	s := &Server{}
+	err := r.db.QueryRow(
+		ctx,
+		`
+		SELECT
+			id,
+			name,
+			icon_url,
+			owner_id,
+			created_at,
+			updated_at
+		FROM servers
+		WHERE id = $1
+		`,
+		id,
+	).Scan(
+		&s.ID,
+		&s.Name,
+		&s.IconURL,
+		&s.OwnerID,
+		&s.CreatedAt,
+		&s.UpdatedAt,
+	)
+	if err != nil {
+		return nil, err
+	}
+	return s, nil
+}
+
+func (r *Repository) Update(ctx context.Context, id string, name string, iconURL string) error {
+	_, err := r.db.Exec(
+		ctx,
+		`UPDATE servers SET name = $1, icon_url = $2, updated_at = NOW() WHERE id = $3`,
+		name,
+		iconURL,
+		id,
+	)
+	return err
+}
+
+func (r *Repository) Delete(ctx context.Context, id string) error {
+	_, err := r.db.Exec(ctx, `DELETE FROM servers WHERE id = $1`, id)
+	return err
+}
+
+func (r *Repository) ListByUserID(ctx context.Context, userID string) ([]Server, error) {
+	rows, err := r.db.Query(
+		ctx,
+		`
+		SELECT
+			s.id,
+			s.name,
+			s.icon_url,
+			s.owner_id,
+			s.created_at,
+			s.updated_at
+		FROM servers s
+		JOIN server_members sm ON sm.server_id = s.id
+		WHERE sm.user_id = $1
+		ORDER BY s.name
+		`,
+		userID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var servers []Server
+	for rows.Next() {
+		var s Server
+		if err := rows.Scan(
+			&s.ID,
+			&s.Name,
+			&s.IconURL,
+			&s.OwnerID,
+			&s.CreatedAt,
+			&s.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		servers = append(servers, s)
+	}
+
+	if servers == nil {
+		servers = []Server{}
+	}
+
+	return servers, nil
+}
+
+func (r *Repository) ListMembers(ctx context.Context, serverID string) ([]ServerMember, error) {
+	rows, err := r.db.Query(
+		ctx,
+		`
+		SELECT
+			sm.server_id,
+			sm.user_id,
+			u.username,
+			u.display_name,
+			u.avatar_url,
+			sm.role,
+			sm.joined_at,
+			sm.updated_at
+		FROM server_members sm
+		JOIN users u ON u.id = sm.user_id
+		WHERE sm.server_id = $1
+		ORDER BY sm.role, sm.joined_at
+		`,
+		serverID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var members []ServerMember
+	for rows.Next() {
+		var m ServerMember
+		if err := rows.Scan(
+			&m.ServerID,
+			&m.UserID,
+			&m.Username,
+			&m.DisplayName,
+			&m.AvatarURL,
+			&m.Role,
+			&m.JoinedAt,
+			&m.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		members = append(members, m)
+	}
+
+	if members == nil {
+		members = []ServerMember{}
+	}
+
+	return members, nil
+}
+
+func (r *Repository) IsMember(ctx context.Context, serverID string, userID string) (bool, error) {
+	var exists bool
+	err := r.db.QueryRow(
+		ctx,
+		`SELECT EXISTS(SELECT 1 FROM server_members WHERE server_id = $1 AND user_id = $2)`,
+		serverID,
+		userID,
+	).Scan(&exists)
+	return exists, err
+}
+
+func (r *Repository) FindMemberByUserID(ctx context.Context, serverID string, userID string) (*ServerMember, error) {
+	m := &ServerMember{}
+	err := r.db.QueryRow(
+		ctx,
+		`
+		SELECT
+			sm.server_id,
+			sm.user_id,
+			u.username,
+			u.display_name,
+			u.avatar_url,
+			sm.role,
+			sm.joined_at,
+			sm.updated_at
+		FROM server_members sm
+		JOIN users u ON u.id = sm.user_id
+		WHERE sm.server_id = $1 AND sm.user_id = $2
+		`,
+		serverID,
+		userID,
+	).Scan(
+		&m.ServerID,
+		&m.UserID,
+		&m.Username,
+		&m.DisplayName,
+		&m.AvatarURL,
+		&m.Role,
+		&m.JoinedAt,
+		&m.UpdatedAt,
+	)
+	if err != nil {
+		return nil, err
+	}
+	return m, nil
+}
+
+func (r *Repository) CreateInvite(ctx context.Context, invite *ServerInvite) error {
+	return r.db.QueryRow(
+		ctx,
+		`
+		INSERT INTO server_invites (id, server_id, inviter_id, invitee_id, status)
+		VALUES ($1, $2, $3, $4, 'pending')
+		RETURNING
+			id,
+			server_id,
+			inviter_id,
+			invitee_id,
+			status,
+			created_at,
+			responded_at
+		`,
+		invite.ID,
+		invite.ServerID,
+		invite.InviterID,
+		invite.InviteeID,
+	).Scan(
+		&invite.ID,
+		&invite.ServerID,
+		&invite.InviterID,
+		&invite.InviteeID,
+		&invite.Status,
+		&invite.CreatedAt,
+		&invite.RespondedAt,
+	)
+}
+
+func (r *Repository) FindPendingInvite(ctx context.Context, serverID string, inviteeID string) (*ServerInvite, error) {
+	invite := &ServerInvite{}
+	err := r.db.QueryRow(
+		ctx,
+		`
+		SELECT
+			id,
+			server_id,
+			inviter_id,
+			invitee_id,
+			status,
+			created_at,
+			responded_at
+		FROM server_invites
+		WHERE server_id = $1 AND invitee_id = $2 AND status = 'pending'
+		`,
+		serverID,
+		inviteeID,
+	).Scan(
+		&invite.ID,
+		&invite.ServerID,
+		&invite.InviterID,
+		&invite.InviteeID,
+		&invite.Status,
+		&invite.CreatedAt,
+		&invite.RespondedAt,
+	)
+	if err != nil {
+		return nil, err
+	}
+	return invite, nil
+}
+
+func (r *Repository) FindInviteByID(ctx context.Context, id string) (*ServerInvite, error) {
+	invite := &ServerInvite{}
+	err := r.db.QueryRow(
+		ctx,
+		`
+		SELECT
+			id,
+			server_id,
+			inviter_id,
+			invitee_id,
+			status,
+			created_at,
+			responded_at
+		FROM server_invites
+		WHERE id = $1
+		`,
+		id,
+	).Scan(
+		&invite.ID,
+		&invite.ServerID,
+		&invite.InviterID,
+		&invite.InviteeID,
+		&invite.Status,
+		&invite.CreatedAt,
+		&invite.RespondedAt,
+	)
+	if err != nil {
+		return nil, err
+	}
+	return invite, nil
+}
+
+func (r *Repository) ListInvitesByInvitee(ctx context.Context, inviteeID string) ([]ServerInvite, error) {
+	rows, err := r.db.Query(
+		ctx,
+		`
+		SELECT
+			si.id,
+			si.server_id,
+			s.name,
+			s.icon_url,
+			si.inviter_id,
+			u.username,
+			si.invitee_id,
+			si.status,
+			si.created_at,
+			si.responded_at
+		FROM server_invites si
+		JOIN servers s ON s.id = si.server_id
+		JOIN users u ON u.id = si.inviter_id
+		WHERE si.invitee_id = $1
+		AND si.status = 'pending'
+		ORDER BY si.created_at DESC
+		`,
+		inviteeID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var invites []ServerInvite
+	for rows.Next() {
+		var i ServerInvite
+		if err := rows.Scan(
+			&i.ID,
+			&i.ServerID,
+			&i.ServerName,
+			&i.ServerIconURL,
+			&i.InviterID,
+			&i.InviterUsername,
+			&i.InviteeID,
+			&i.Status,
+			&i.CreatedAt,
+			&i.RespondedAt,
+		); err != nil {
+			return nil, err
+		}
+		invites = append(invites, i)
+	}
+
+	if invites == nil {
+		invites = []ServerInvite{}
+	}
+
+	return invites, nil
+}
+
+func (r *Repository) ListInvitesByServer(ctx context.Context, serverID string) ([]ServerInvite, error) {
+	rows, err := r.db.Query(
+		ctx,
+		`
+		SELECT
+			si.id,
+			si.server_id,
+			s.name,
+			s.icon_url,
+			si.inviter_id,
+			u_inviter.username,
+			si.invitee_id,
+			u_invitee.username,
+			si.status,
+			si.created_at,
+			si.responded_at
+		FROM server_invites si
+		JOIN servers s ON s.id = si.server_id
+		JOIN users u_inviter ON u_inviter.id = si.inviter_id
+		JOIN users u_invitee ON u_invitee.id = si.invitee_id
+		WHERE si.server_id = $1
+		AND si.status = 'pending'
+		ORDER BY si.created_at DESC
+		`,
+		serverID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var invites []ServerInvite
+	for rows.Next() {
+		var i ServerInvite
+		if err := rows.Scan(
+			&i.ID,
+			&i.ServerID,
+			&i.ServerName,
+			&i.ServerIconURL,
+			&i.InviterID,
+			&i.InviterUsername,
+			&i.InviteeID,
+			&i.InviteeUsername,
+			&i.Status,
+			&i.CreatedAt,
+			&i.RespondedAt,
+		); err != nil {
+			return nil, err
+		}
+		invites = append(invites, i)
+	}
+
+	if invites == nil {
+		invites = []ServerInvite{}
+	}
+
+	return invites, nil
+}
+
+func (r *Repository) UpdateInviteStatus(ctx context.Context, id string, status string) error {
+	_, err := r.db.Exec(
+		ctx,
+		`
+		UPDATE server_invites
+		SET status = $2, responded_at = NOW()
+		WHERE id = $1
+		`,
+		id,
+		status,
+	)
+	return err
+}

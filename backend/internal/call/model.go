@@ -1,0 +1,136 @@
+package call
+
+import (
+	"encoding/json"
+	"time"
+)
+
+const (
+	TypeDM      = "dm"
+	TypeChannel = "channel"
+
+	StatusRinging = "ringing"
+	StatusActive  = "active"
+	StatusEnded   = "ended"
+
+	RoleMember    = "member"
+	RolePresenter = "presenter"
+)
+
+type Call struct {
+	ID             string     `json:"id"`
+	Type           string     `json:"type"`
+	ConversationID *string    `json:"conversation_id,omitempty"`
+	ChannelID      *string    `json:"channel_id,omitempty"`
+	ServerID       *string    `json:"server_id,omitempty"`
+	InitiatorID    string     `json:"initiator_id"`
+	Status         string     `json:"status"`
+	StartedAt      time.Time  `json:"started_at"`
+	EndedAt        *time.Time `json:"ended_at,omitempty"`
+}
+
+type CallParticipant struct {
+	CallID   string     `json:"call_id"`
+	UserID   string     `json:"user_id"`
+	Role     string     `json:"role"`
+	JoinedAt time.Time  `json:"joined_at"`
+	LeftAt   *time.Time `json:"left_at,omitempty"`
+}
+
+type UserInfo struct {
+	ID          string  `json:"id"`
+	Username    string  `json:"username"`
+	DisplayName string  `json:"display_name"`
+	AvatarURL   *string `json:"avatar_url,omitempty"`
+}
+
+// Server -> Client events
+
+type InviteEvent struct {
+	CallID         string   `json:"call_id"`
+	Type           string   `json:"type"`
+	Initiator      UserInfo `json:"initiator"`
+	ConversationID *string  `json:"conversation_id,omitempty"`
+	ChannelID      *string  `json:"channel_id,omitempty"`
+	ServerID       *string  `json:"server_id,omitempty"`
+}
+
+type RingEvent struct {
+	CallID string   `json:"call_id"`
+	Callee UserInfo `json:"callee"`
+}
+
+type ResponseEvent struct {
+	CallID string   `json:"call_id"`
+	User   UserInfo `json:"user"`
+}
+
+type SignalRelayEvent struct {
+	CallID     string          `json:"call_id"`
+	FromUserID string          `json:"from_user_id"`
+	SDP        json.RawMessage `json:"sdp,omitempty"`
+	Candidate  json.RawMessage `json:"candidate,omitempty"`
+	Media      string          `json:"media,omitempty"`
+}
+
+type StateEvent struct {
+	CallID string   `json:"call_id"`
+	User   UserInfo `json:"user"`
+}
+
+// ScreenEvent sinaliza que um participante começou ("active": true) ou parou
+// de compartilhar tela na chamada. Transitório — não é persistido.
+type ScreenEvent struct {
+	CallID string   `json:"call_id"`
+	User   UserInfo `json:"user"`
+	Active bool     `json:"active"`
+}
+
+type EndedEvent struct {
+	CallID string `json:"call_id"`
+}
+
+type BusyEvent struct {
+	CallID string `json:"call_id"`
+}
+
+type ErrorEvent struct {
+	CallID  string `json:"call_id,omitempty"`
+	Message string `json:"message"`
+}
+
+// Client -> Server payloads
+
+type InvitePayload struct {
+	Type           string `json:"type"`
+	ConversationID string `json:"conversation_id,omitempty"`
+	ChannelID      string `json:"channel_id,omitempty"`
+}
+
+type SignalPayload struct {
+	CallID    string          `json:"call_id"`
+	ToUserID  string          `json:"to_user_id,omitempty"`
+	SDP       json.RawMessage `json:"sdp,omitempty"`
+	Candidate json.RawMessage `json:"candidate,omitempty"`
+	Media     string          `json:"media,omitempty"`
+}
+
+type ScreenPayload struct {
+	CallID string `json:"call_id"`
+	Active bool   `json:"active"`
+}
+
+type LeavePayload struct {
+	CallID string `json:"call_id"`
+}
+
+func marshalEvent(typ string, payload interface{}) []byte {
+	data, err := json.Marshal(map[string]interface{}{
+		"type":    typ,
+		"payload": payload,
+	})
+	if err != nil {
+		return nil
+	}
+	return data
+}

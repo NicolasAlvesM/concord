@@ -1,0 +1,14 @@
+package call
+
+import "github.com/gin-gonic/gin"
+
+func CallRoutes(router *gin.RouterGroup, handler *Handler, authMiddleware gin.HandlerFunc) {
+	calls := router.Group("/calls")
+	calls.Use(authMiddleware)
+	{
+		calls.POST("", handler.Create)
+		calls.GET("/active", handler.Active)
+		calls.GET("/:id/state", handler.State)
+		calls.DELETE("/:id", handler.Delete)
+	}
+}

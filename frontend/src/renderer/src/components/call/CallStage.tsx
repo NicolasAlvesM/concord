@@ -1,0 +1,156 @@
+import { useAuthStore } from '../../store/authStore'
+import { useCallStore } from '../../store/callStore'
+import type { CallUserInfo } from '../../store/callStore'
+import { ChevronDownIcon } from '../icons'
+import ParticipantTile from './ParticipantTile'
+
+interface ScreenEntry {
+  userId: string
+  stream: MediaStream
+}
+
+/**
+ * Palco da chamada estilo Discord: sem tela = grid de avatares; com telas,
+ * cada tile de tela pode ser expandido (foco grande + demais em mini-grid).
+ * Compartilhado entre VoiceChannelView e DmCallView.
+ */
+function CallStage({
+  gap = 'gap-6',
+  speaking
+}: {
+  gap?: string
+  /** ids dos usuários falando agora (useSpeaking) */
+  speaking?: Set<string>
+}): React.JSX.Element {
+  const me = useAuthStore((s) => s.user)
+  const participants = useCallStore((s) => s.participants)
+  const muted = useCallStore((s) => s.muted)
+  const localScreenStream = useCallStore((s) => s.localScreenStream)
+  const screenStreams = useCallStore((s) => s.screenStreams)
+  const focusedId = useCallStore((s) => s.focusedScreenUserId)
+  const setFocused = useCallStore((s) => s.setFocusedScreenUser)
+  const localCameraStream = useCallStore((s) => s.localCameraStream)
+  const videoStreams = useCallStore((s) => s.videoStreams)
+
+  const meId = me?.id ?? 'me'
+  const meInfo: CallUserInfo = {
+    id: meId,
+    username: me?.username ?? '',
+    display_name: me?.display_name ?? 'Você'
+  }
+
+  const nameOf = (userId: string): CallUserInfo =>
+    userId === meId
+      ? meInfo
+      : (participants.find((p) => p.id === userId) ?? {
+          id: userId,
+          username: '',
+          display_name: 'Usuário'
+        })
+
+  const screens: ScreenEntry[] = [
+    ...(localScreenStream ? [{ userId: meId, stream: localScreenStream }] : []),
+    ...Object.entries(screenStreams).map(([userId, stream]) => ({ userId, stream }))
+  ]
+  const hasScreens = screens.length > 0
+
+  // Sem ninguém compartilhando: grid de avatares/vídeos de câmera (eu + participantes).
+  if (!hasScreens) {
+    return (
+      <div className={`flex flex-wrap items-center justify-center ${gap}`}>
+        <ParticipantTile user={meInfo} selfMuted={muted} videoStream={localCameraStream} mirror />
+        {participants.map((p) => (
+          <ParticipantTile
+            key={p.id}
+            user={p}
+            speaking={speaking?.has(p.id) ?? false}
+            videoStream={videoStreams[p.id] ?? null}
+          />
+        ))}
+      </div>
+    )
+  }
+
+  const focused = screens.find((entry) => entry.userId === focusedId) ?? null
+
+  // Sem foco selecionado: todos os tiles lado a lado (telas clicáveis).
+  if (!focused) {
+    return (
+      <div className={`flex flex-wrap items-center justify-center ${gap}`}>
+        {screens.map((entry) => (
+          <ParticipantTile
+            key={entry.userId}
+            user={nameOf(entry.userId)}
+            videoStream={entry.stream}
+            isScreen
+            onClick={() => setFocused(entry.userId)}
+          />
+        ))}
+        <ParticipantTile user={meInfo} selfMuted={muted} />
+        {participants
+          .filter((p) => !screenStreams[p.id])
+          .map((p) => (
+            <ParticipantTile key={p.id} user={p} speaking={speaking?.has(p.id) ?? false} />
+          ))}
+      </div>
+    )
+  }
+
+  // Foco grande (estilo Go Live) + strip com os demais.
+  return (
+    <div className="flex h-full w-full max-w-6xl flex-col gap-4">
+      <div className="relative min-h-0 flex-1">
+        <div className="absolute inset-x-0 top-0 z-10 flex items-start justify-between px-1">
+          <button
+            onClick={() => setFocused(null)}
+            aria-label="Sair do modo foco"
+            title="Sair da tela cheia"
+            className="flex h-8 w-8 cursor-pointer items-center justify-center rounded-full bg-black/60 text-gray-200 backdrop-blur-sm transition-colors hover:bg-black/80 hover:text-white"
+          >
+            <ChevronDownIcon className="h-4 w-4" />
+          </button>
+        </div>
+        <ParticipantTile
+          user={nameOf(focused.userId)}
+          videoStream={focused.stream}
+          isScreen
+          size="fill"
+        />
+      </div>
+      <div className="flex shrink-0 flex-wrap items-center justify-center gap-3">
+        {screens
+          .filter((entry) => entry.userId !== focused.userId)
+          .map((entry) => (
+            <ParticipantTile
+              key={entry.userId}
+              user={nameOf(entry.userId)}
+              videoStream={entry.stream}
+              isScreen
+              size="md"
+              onClick={() => setFocused(entry.userId)}
+            />
+          ))}
+        <ParticipantTile
+          user={meInfo}
+          selfMuted={muted}
+          size="md"
+          videoStream={localCameraStream}
+          mirror
+        />
+        {participants
+          .filter((p) => p.id !== focused.userId && !screenStreams[p.id])
+          .map((p) => (
+            <ParticipantTile
+              key={p.id}
+              user={p}
+              size="md"
+              speaking={speaking?.has(p.id) ?? false}
+              videoStream={videoStreams[p.id] ?? null}
+            />
+          ))}
+      </div>
+    </div>
+  )
+}
+
+export default CallStage
