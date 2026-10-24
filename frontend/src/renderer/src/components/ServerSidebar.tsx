@@ -18,6 +18,7 @@ import Input from './Input'
 import VoiceConnectedPanel from './call/VoiceConnectedPanel'
 import { GearIcon, UserPlusIcon, PlusIcon, PencilIcon, TrashIcon, VolumeIcon } from './icons'
 import VoiceSettings from './VoiceSettings'
+import AppSettings from './AppSettings'
 
 export function ServerSidebar(): React.JSX.Element {
   const navigate = useNavigate()
@@ -699,6 +700,7 @@ export function ServerSidebar(): React.JSX.Element {
             </div>
           </div>
           {settingsOpen && <VoiceSettings />}
+          {settingsOpen && <AppSettings />}
           <Button variant="danger" onClick={handleLogout} disabled={loggingOut}>
             {loggingOut ? 'Saindo...' : 'Sair da conta'}
           </Button>

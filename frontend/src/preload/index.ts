@@ -27,6 +27,40 @@ const api = {
     cancel(): void {
       ipcRenderer.send('screen-picker:cancel')
     }
+  },
+  background: {
+    /** Estado da chamada para o menu da bandeja. */
+    setCallState(state: { inCall: boolean; muted: boolean }): void {
+      ipcRenderer.send('call:state', state)
+    },
+    /** Notificação nativa (só aparece se a janela não estiver à vista). */
+    notify(payload: { title: string; body: string; route: string; urgent?: boolean }): void {
+      ipcRenderer.send('notify', payload)
+    },
+    quit(): void {
+      ipcRenderer.send('app:quit')
+    },
+    getAutostart(): Promise<boolean | null> {
+      return ipcRenderer.invoke('settings:autostart')
+    },
+    setAutostart(enabled: boolean): Promise<boolean | null> {
+      return ipcRenderer.invoke('settings:set-autostart', enabled)
+    },
+    onToggleMute(cb: () => void): () => void {
+      const listener = (): void => cb()
+      ipcRenderer.on('tray:toggle-mute', listener)
+      return () => ipcRenderer.removeListener('tray:toggle-mute', listener)
+    },
+    onQuitRequested(cb: () => void): () => void {
+      const listener = (): void => cb()
+      ipcRenderer.on('app:quit-requested', listener)
+      return () => ipcRenderer.removeListener('app:quit-requested', listener)
+    },
+    onNavigate(cb: (route: string) => void): () => void {
+      const listener = (_e: unknown, route: string): void => cb(route)
+      ipcRenderer.on('navigate', listener)
+      return () => ipcRenderer.removeListener('navigate', listener)
+    }
   }
 }
 

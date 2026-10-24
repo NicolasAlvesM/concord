@@ -12,6 +12,7 @@ import { getAudioStream, getCameraStream, getDisplayStream } from '../lib/rtc'
 import { CallMedia, type RemoteMedia } from '../lib/livekit'
 import { LIVEKIT_URL } from '../lib/config'
 import { retry } from '../lib/retry'
+import { callNotification } from '../lib/notifications'
 import { loadAudioPrefs, resolveDeviceId, saveAudioPrefs } from '../lib/audioDevices'
 import { useChatStore } from './chatStore'
 import { useAuthStore } from './authStore'
@@ -707,6 +708,7 @@ export const useCallStore = create<CallState>()((set, get) => {
         case 'call:invite': {
           const p = payload as unknown as InvitePayload
           if (p.type !== 'dm' || get().status !== 'idle') return
+          window.api?.background?.notify(callNotification(p.initiator))
           set({
             status: 'ringing',
             callId: p.call_id,

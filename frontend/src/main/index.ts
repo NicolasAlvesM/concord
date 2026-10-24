@@ -3,6 +3,7 @@ import { join } from 'path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
 import { displayMediaStreams } from './displayMedia'
+import { attachCloseToTray, ensureSingleInstance, setupBackground, startHidden } from './background'
 
 let mainWindow: BrowserWindow | null = null
 
@@ -78,8 +79,10 @@ function createWindow(): void {
   })
 
   mainWindow.on('ready-to-show', () => {
-    mainWindow?.show()
+    // Aberto pelo "Iniciar com o Windows": fica só na bandeja.
+    if (!startHidden()) mainWindow?.show()
   })
+  attachCloseToTray(mainWindow)
 
   mainWindow.on('closed', () => {
     mainWindow = null
@@ -102,11 +105,15 @@ function createWindow(): void {
 // This method will be called when Electron has finished
 // initialization and is ready to create browser windows.
 // Some APIs can only be used after this event occurs.
+// Só uma instância: abrir de novo traz a janela existente.
+if (!ensureSingleInstance(() => mainWindow)) app.quit()
+
 app.whenReady().then(() => {
   // Set app user model id for windows
   electronApp.setAppUserModelId('com.concord.app')
 
   registerScreenShareHandlers()
+  setupBackground(() => mainWindow, icon)
 
   // Default open or close DevTools by F12 in development
   // and ignore CommandOrControl + R in production.
