@@ -56,7 +56,9 @@ function writePrefs(prefs: { autostartInitialized?: boolean }): void {
   }
 }
 
-const autostartSupported = (): boolean => process.platform === 'win32'
+// O portable roda de uma pasta temporária: um atalho de login para ele quebraria.
+const autostartSupported = (): boolean =>
+  process.platform === 'win32' && !process.env.PORTABLE_EXECUTABLE_FILE
 
 function setAutostart(enabled: boolean): void {
   app.setLoginItemSettings({ openAtLogin: enabled, args: ['--hidden'] })

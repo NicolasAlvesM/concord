@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import { messageNotification } from '../lib/notifications'
+import { messageNotification, notifyDesktop } from '../lib/notifications'
 import { useAuthStore } from './authStore'
 import { WsClient, type WsEvent } from '../api/ws'
 import type { Message } from '../api/messages'
@@ -318,7 +318,7 @@ export const useChatStore = create<ChatState>()((set, get) => ({
         })
 
         const notification = messageNotification(msg, useAuthStore.getState().user?.id ?? '')
-        if (notification) window.api?.background?.notify(notification)
+        if (notification) notifyDesktop(notification)
 
         if (msg.conversation_id) {
           const meId = useAuthStore.getState().user?.id

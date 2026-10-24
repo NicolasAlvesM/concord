@@ -361,4 +361,67 @@ describe('callStore — mídia via LiveKit', () => {
     useCallStore.getState().setOutputDevice('fone')
     expect(useCallStore.getState().outputDeviceId).toBe('fone')
   })
+
+  it('depois de trocar o microfone, reaplica o mute na sala (o SDK pode ter mutado sozinho)', async () => {
+    rtc.getAudioStream
+      .mockResolvedValueOnce(fakeStream('audio'))
+      .mockResolvedValueOnce(fakeStream('audio'))
+    await joinChannel()
+    const connection = media.instances[0]
+    connection.setMicMuted.mockClear()
+
+    await useCallStore.getState().setInputDevice('')
+
+    expect(connection.replaceMic).toHaveBeenCalled()
+    expect(connection.setMicMuted).toHaveBeenLastCalledWith(false)
+  })
+
+  it('microfone salvo que sumiu: entra com o padrão do sistema em vez de falhar', async () => {
+    await useCallStore.getState().setInputDevice('headset-desconectado')
+    rtc.getAudioStream.mockImplementation(async (id?: string) => {
+      if (id) throw Object.assign(new Error('x'), { name: 'OverconstrainedError' })
+      return fakeStream('audio')
+    })
+
+    await joinChannel()
+
+    expect(useCallStore.getState().status).toBe('active')
+    expect(useCallStore.getState().inputDeviceId).toBe('')
+    expect(rtc.getAudioStream).toHaveBeenLastCalledWith('')
+  })
+
+  it('não avisa mudo/ensurdecido antes de a chamada estar ativa (DM tocando)', async () => {
+    useCallStore.getState().handleWsEvent({
+      type: 'call:invite',
+      payload: {
+        call_id: 'dm-1',
+        type: 'dm',
+        initiator: { id: 'ana', username: 'ana', display_name: 'Ana' }
+      }
+    })
+    chat.sendEvent.mockClear()
+
+    useCallStore.getState().toggleMute()
+
+    expect(chat.sendEvent).not.toHaveBeenCalledWith('call:voice', expect.anything())
+    expect(useCallStore.getState().status).toBe('ringing')
+  })
+
+  it('ao conectar a mídia, avisa o estado atual de mudo/ensurdecido', async () => {
+    const connected = deferred<void>()
+    media.connect.mockReturnValue(connected.promise)
+    await useCallStore.getState().startChannelCall('canal-1')
+    useCallStore.getState().toggleDeafen()
+    chat.sendEvent.mockClear()
+
+    connected.resolve()
+    await flush()
+    await flush()
+
+    expect(chat.sendEvent).toHaveBeenCalledWith('call:voice', {
+      call_id: 'call-1',
+      muted: true,
+      deafened: true
+    })
+  })
 })

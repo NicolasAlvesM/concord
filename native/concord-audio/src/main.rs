@@ -17,7 +17,24 @@ fn main() -> ExitCode {
             return ExitCode::from(2);
         }
     };
+    exit_when_parent_goes_away();
     run(&mode)
+}
+
+/// O Concord mantém o stdin aberto; quando ele fecha (Concord saiu ou morreu),
+/// o helper encerra — mesmo se o app capturado estiver em silêncio.
+fn exit_when_parent_goes_away() {
+    std::thread::spawn(|| {
+        use std::io::Read;
+        let mut stdin = std::io::stdin();
+        let mut buf = [0u8; 64];
+        loop {
+            match stdin.read(&mut buf) {
+                Ok(0) | Err(_) => std::process::exit(0),
+                Ok(_) => {}
+            }
+        }
+    });
 }
 
 #[cfg(windows)]

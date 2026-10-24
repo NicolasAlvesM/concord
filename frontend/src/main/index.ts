@@ -5,7 +5,12 @@ import icon from '../../resources/icon.png?asset'
 import { displayMediaStreams } from './displayMedia'
 import { attachCloseToTray, ensureSingleInstance, setupBackground, startHidden } from './background'
 import { setupUpdater } from './updater'
-import { hwndFromSourceId, registerScreenAudio, startWindowAudio } from './screenAudio'
+import {
+  hwndFromSourceId,
+  registerScreenAudio,
+  startWindowAudio,
+  stopWindowAudio
+} from './screenAudio'
 
 let mainWindow: BrowserWindow | null = null
 
@@ -45,6 +50,8 @@ function registerScreenShareHandlers(): void {
     try {
       const sources = await desktopCapturer.getSources({ types: ['screen', 'window'] })
       const source = sources.find((s) => s.id === sourceId)
+      // Cada escolha começa do zero: nada do compartilhamento anterior.
+      stopWindowAudio()
       // Janela no Windows: som só do app dela (helper nativo). Se o helper não
       // subir (Windows antigo), cai no som do sistema sem o Concord.
       const hwnd = source ? hwndFromSourceId(source.id) : null
@@ -65,6 +72,7 @@ function registerScreenShareHandlers(): void {
   })
 
   ipcMain.on('screen-picker:cancel', () => {
+    stopWindowAudio()
     const callback = pendingDisplayCallback
     pendingDisplayCallback = null
     if (callback) callback({})
@@ -117,7 +125,8 @@ function createWindow(): void {
 // initialization and is ready to create browser windows.
 // Some APIs can only be used after this event occurs.
 // Só uma instância: abrir de novo traz a janela existente.
-if (!ensureSingleInstance(() => mainWindow)) app.quit()
+// app.exit (não quit): sai na hora, sem criar janela/bandeja duplicadas.
+if (!ensureSingleInstance(() => mainWindow)) app.exit(0)
 
 app.whenReady().then(() => {
   // Set app user model id for windows

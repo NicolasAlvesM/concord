@@ -81,12 +81,59 @@ const browser = await chromium.launch({
   ]
 })
 
-async function openClient(user) {
+// Simula o Electron no Windows para o fluxo do som da janela: o seletor do
+// app (api.screenPicker) e o processo main entregando o MessagePort com PCM do
+// helper — de propósito DEPOIS do vídeo (canais sem ordem garantida).
+function fakeElectronWindowAudio() {
+  window.electron = { process: { platform: 'win32' } }
+  const showListeners = []
+  let pick = null
+  const thumb = 'data:image/gif;base64,R0lGODlhAQABAAAAACw='
+  window.api = {
+    screenPicker: {
+      onShow: (cb) => { showListeners.push(cb); return () => {} },
+      listSources: async () => [
+        { id: 'screen:0:0', name: 'Tela inteira', thumbnail: thumb, appIcon: null, displayId: '0' },
+        { id: 'window:4242:0', name: 'Jogo', thumbnail: thumb, appIcon: null, displayId: '' }
+      ],
+      select: (id) => pick?.(id),
+      cancel: () => pick?.(null)
+    },
+    screenAudio: { stop: () => { window.__screenAudioStops = (window.__screenAudioStops ?? 0) + 1 } }
+  }
+  const original = navigator.mediaDevices.getDisplayMedia.bind(navigator.mediaDevices)
+  navigator.mediaDevices.getDisplayMedia = (constraints) => new Promise((resolve, reject) => {
+    pick = async (id) => {
+      if (!id) return reject(new DOMException('cancelado', 'NotAllowedError'))
+      resolve(await original(constraints))
+      if (!id.startsWith('window:')) return
+      setTimeout(() => {
+        const channel = new MessageChannel()
+        let t = 0
+        setInterval(() => {
+          const frames = 960 // 20 ms a 48 kHz, tom de 1 kHz
+          const pcm = new Float32Array(frames * 2)
+          for (let i = 0; i < frames; i++, t++) {
+            const v = 0.4 * Math.sin((2 * Math.PI * 1000 * t) / 48000)
+            pcm[i * 2] = v
+            pcm[i * 2 + 1] = v
+          }
+          channel.port1.postMessage(pcm.buffer, [pcm.buffer])
+        }, 20)
+        window.postMessage('concord:screen-audio-port', '*', [channel.port2])
+      }, 300)
+    }
+    showListeners.forEach((cb) => cb())
+  })
+}
+
+async function openClient(user, initScript) {
   const context = await browser.newContext({
     permissions: ['microphone', 'camera'],
     viewport: { width: 2560, height: 1440 }
   })
   const page = await context.newPage()
+  if (initScript) await page.addInitScript(initScript)
   page.on('response', (r) => { if (r.status() === 404) console.log(`[${user.username}] 404:`, r.url()) })
   page.on('console', (m) => { if (m.type() === 'error') console.log(`[${user.username}] console:`, m.text()) })
   await page.goto(APP + '#/login')
@@ -122,7 +169,7 @@ async function waitFor(desc, fn, ok, timeout = 20000) {
 
 let failed = false
 try {
-  const pageA = await openClient(ana)
+  const pageA = await openClient(ana, fakeElectronWindowAudio)
   const pageB = await openClient(bia)
 
   await waitFor('ana ouve a bia', () => audioTracks(pageA), (t) => t.includes('live'))
@@ -167,24 +214,10 @@ try {
       el.previousElementSibling?.className.includes('ring-[#23a55a]'))), (ok) => ok === true)
   await waitFor('bia continua ouvindo a ana', () => audioTracks(pageB), (t) => t.includes('live'))
 
-  // Som só da janela: simula o helper nativo entregando PCM (tom de 1 kHz)
-  // pelo MessagePort, como o processo main faz no Windows.
-  await pageA.evaluate(() => {
-    const channel = new MessageChannel()
-    let t = 0
-    setInterval(() => {
-      const frames = 960 // 20 ms a 48 kHz
-      const pcm = new Float32Array(frames * 2)
-      for (let i = 0; i < frames; i++, t++) {
-        const v = 0.4 * Math.sin((2 * Math.PI * 1000 * t) / 48000)
-        pcm[i * 2] = v
-        pcm[i * 2 + 1] = v
-      }
-      channel.port1.postMessage(pcm.buffer, [pcm.buffer])
-    }, 20)
-    window.postMessage('concord:screen-audio-port', '*', [channel.port2])
-  })
+  // Seletor do app: aba Aplicativos → a janela "Jogo".
   await pageA.getByRole('button', { name: 'Compartilhar tela' }).click()
+  await pageA.getByRole('button', { name: 'Aplicativos' }).click()
+  await pageA.getByRole('button', { name: 'Compartilhar', exact: true }).click()
   await waitFor('bia recebe o som da janela como track separada', () => audioTracks(pageB), (t) => t.filter((s) => s === 'live').length >= 2)
   await waitFor('o som da janela chega com volume', () => pageB.evaluate(async () => {
     const ctx = new AudioContext()
@@ -230,6 +263,8 @@ try {
 
   // DM: ana liga para a bia, bia aceita, ambos se ouvem e a bia liga a câmera.
   await pageA.getByRole('button', { name: 'Desconectar', exact: true }).click()
+  await waitFor('captura do som da janela encerrada ao sair', () =>
+    pageA.evaluate(() => window.__screenAudioStops ?? 0), (n) => n >= 1)
   await pageA.goto(APP + `#/dm/${bia.id}`)
   await pageA.getByRole('button', { name: 'Iniciar chamada de voz' }).click()
   await pageB.getByRole('button', { name: 'Aceitar chamada' }).click({ timeout: 15000 })

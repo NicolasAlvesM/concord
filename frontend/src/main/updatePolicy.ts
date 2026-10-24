@@ -9,9 +9,20 @@ export function canDownloadUpdate(inCall: boolean): boolean {
 }
 
 /**
- * Instala sozinho só logo ao abrir (estava baixada da sessão anterior).
- * Depois disso, só pelo aviso "Nova atualização disponível".
+ * Instala sozinho só logo ao abrir e só se essa versão já tinha sido baixada e
+ * verificada numa sessão anterior. Download que acabou agora — mesmo que
+ * rápido — só gera o aviso "Nova atualização disponível".
  */
-export function installOnStartup(state: { msSinceStart: number; inCall: boolean }): boolean {
-  return !state.inCall && state.msSinceStart <= STARTUP_WINDOW_MS
+export function installOnStartup(state: {
+  version: string
+  /** versão verificada guardada da sessão anterior (userData) */
+  verifiedBefore: string | null
+  msSinceStart: number
+  inCall: boolean
+}): boolean {
+  return (
+    !state.inCall &&
+    state.verifiedBefore === state.version &&
+    state.msSinceStart <= STARTUP_WINDOW_MS
+  )
 }

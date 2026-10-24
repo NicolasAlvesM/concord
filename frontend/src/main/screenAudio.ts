@@ -16,6 +16,11 @@ export function hwndFromSourceId(sourceId: string): string | null {
   return match ? match[1] : null
 }
 
+/** O helper escreve "ready" numa linha própria quando a captura começa. */
+export function isReadyLine(text: string): boolean {
+  return /^ready\r?$/m.test(text)
+}
+
 /** Junta pedaços do stdout em quadros inteiros (o pipe corta onde quiser). */
 export class PcmChunker {
   private rest = Buffer.alloc(0)
@@ -57,8 +62,9 @@ export function startWindowAudio(hwnd: string, contents: WebContents): Promise<b
   if (process.platform !== 'win32' || !existsSync(path)) return Promise.resolve(false)
 
   return new Promise((resolve) => {
+    // stdin aberto: quando o Concord morre, o pipe fecha e o helper sai junto.
     const child = spawn(path, ['window', hwnd], {
-      stdio: ['ignore', 'pipe', 'pipe'],
+      stdio: ['pipe', 'pipe', 'pipe'],
       windowsHide: true
     })
     helper = child
@@ -79,8 +85,9 @@ export function startWindowAudio(hwnd: string, contents: WebContents): Promise<b
     })
     child.stderr?.setEncoding('utf8')
     child.stderr?.on('data', (text: string) => {
-      if (!text.includes('ready') || settled) {
-        if (!text.includes('ready')) console.error('[concord-audio]', text.trim())
+      const ready = isReadyLine(text)
+      if (!ready || settled) {
+        if (!ready) console.error('[concord-audio]', text.trim())
         return
       }
       const channel = new MessageChannelMain()
@@ -101,4 +108,5 @@ export function startWindowAudio(hwnd: string, contents: WebContents): Promise<b
 export function registerScreenAudio(): void {
   ipcMain.on('screen-audio:stop', stopWindowAudio)
   app.on('before-quit', stopWindowAudio)
+  app.on('render-process-gone', stopWindowAudio)
 }

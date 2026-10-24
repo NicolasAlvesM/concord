@@ -37,3 +37,9 @@ export function callNotification(caller: {
     urgent: true
   }
 }
+
+/** Pede ao processo main uma notificação nativa (no-op fora do Electron). */
+export function notifyDesktop(notification: AppNotification): void {
+  if (typeof window === 'undefined') return
+  window.api?.background?.notify(notification)
+}

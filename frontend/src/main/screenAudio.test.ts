@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { hwndFromSourceId, PcmChunker } from './screenAudio'
+import { hwndFromSourceId, isReadyLine, PcmChunker } from './screenAudio'
 
 describe('hwndFromSourceId', () => {
   it('extrai o HWND de uma fonte de janela', () => {
@@ -33,5 +33,17 @@ describe('PcmChunker', () => {
     const second = chunker.push(Buffer.from([11, 12, 13, 14, 15, 16]))
     expect([...first]).toEqual([1, 2, 3, 4, 5, 6, 7, 8])
     expect([...second]).toEqual([9, 10, 11, 12, 13, 14, 15, 16])
+  })
+})
+
+describe('isReadyLine', () => {
+  it('reconhece o aviso de início do helper', () => {
+    expect(isReadyLine('ready\n')).toBe(true)
+    expect(isReadyLine('aviso qualquer\nready\r\n')).toBe(true)
+  })
+
+  it('não confunde erros que contêm "ready" (ex.: ALREADY_INITIALIZED)', () => {
+    expect(isReadyLine('erro: AUDCLNT_E_ALREADY_INITIALIZED\n')).toBe(false)
+    expect(isReadyLine('already running')).toBe(false)
   })
 })

@@ -1,7 +1,8 @@
 import { app, BrowserWindow, ipcMain, net } from 'electron'
 import { autoUpdater, type UpdateDownloadedEvent } from 'electron-updater'
-import { readFile, rm } from 'fs/promises'
-import { basename } from 'path'
+import { readFile, rm, writeFile } from 'fs/promises'
+import { readFileSync } from 'fs'
+import { basename, join } from 'path'
 import { isInCall, markQuitting, onCallStateChange } from './background'
 import { canDownloadUpdate, installOnStartup } from './updatePolicy'
 import { verifyInstaller } from './updateSignature'
@@ -19,6 +20,24 @@ interface UpdaterConfig {
 }
 
 const startedAt = Date.now()
+
+// Versão já baixada e verificada (sobrevive ao reinício do app): só ela pode
+// ser instalada sozinha ao abrir.
+const verifiedPath = (): string => join(app.getPath('userData'), 'update-verified.json')
+
+function readVerifiedVersion(): string | null {
+  try {
+    return (
+      (JSON.parse(readFileSync(verifiedPath(), 'utf8')) as { version?: string }).version ?? null
+    )
+  } catch {
+    return null
+  }
+}
+
+function saveVerifiedVersion(version: string): void {
+  void writeFile(verifiedPath(), JSON.stringify({ version })).catch(() => {})
+}
 let pendingDownload = false
 let downloading = false
 let readyVersion: string | null = null
@@ -85,7 +104,16 @@ export function setupUpdater(getWindow: () => BrowserWindow | null, config: Upda
     }
 
     readyVersion = event.version
-    if (installOnStartup({ msSinceStart: Date.now() - startedAt, inCall: isInCall() })) {
+    const verifiedBefore = readVerifiedVersion()
+    saveVerifiedVersion(event.version)
+    if (
+      installOnStartup({
+        version: event.version,
+        verifiedBefore,
+        msSinceStart: Date.now() - startedAt,
+        inCall: isInCall()
+      })
+    ) {
       install()
       return
     }
