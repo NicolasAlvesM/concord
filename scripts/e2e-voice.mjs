@@ -167,7 +167,44 @@ try {
       el.previousElementSibling?.className.includes('ring-[#23a55a]'))), (ok) => ok === true)
   await waitFor('bia continua ouvindo a ana', () => audioTracks(pageB), (t) => t.includes('live'))
 
+  // Som só da janela: simula o helper nativo entregando PCM (tom de 1 kHz)
+  // pelo MessagePort, como o processo main faz no Windows.
+  await pageA.evaluate(() => {
+    const channel = new MessageChannel()
+    let t = 0
+    setInterval(() => {
+      const frames = 960 // 20 ms a 48 kHz
+      const pcm = new Float32Array(frames * 2)
+      for (let i = 0; i < frames; i++, t++) {
+        const v = 0.4 * Math.sin((2 * Math.PI * 1000 * t) / 48000)
+        pcm[i * 2] = v
+        pcm[i * 2 + 1] = v
+      }
+      channel.port1.postMessage(pcm.buffer, [pcm.buffer])
+    }, 20)
+    window.postMessage('concord:screen-audio-port', '*', [channel.port2])
+  })
   await pageA.getByRole('button', { name: 'Compartilhar tela' }).click()
+  await waitFor('bia recebe o som da janela como track separada', () => audioTracks(pageB), (t) => t.filter((s) => s === 'live').length >= 2)
+  await waitFor('o som da janela chega com volume', () => pageB.evaluate(async () => {
+    const ctx = new AudioContext()
+    const levels = []
+    for (const el of document.querySelectorAll('audio')) {
+      if (!el.srcObject) continue
+      const analyser = ctx.createAnalyser()
+      analyser.fftSize = 2048
+      ctx.createMediaStreamSource(el.srcObject).connect(analyser)
+      await new Promise((r) => setTimeout(r, 300))
+      const bins = new Float32Array(analyser.frequencyBinCount)
+      analyser.getFloatFrequencyData(bins)
+      const hz = (i) => Math.round((i * ctx.sampleRate) / analyser.fftSize)
+      let peak = 0
+      bins.forEach((v, i) => { if (v > bins[peak]) peak = i })
+      levels.push(hz(peak))
+    }
+    await ctx.close()
+    return levels
+  }), (peaks) => peaks.some((hz) => Math.abs(hz - 1000) < 60))
   await waitFor('bia vê a tela da ana', () => videoTracks(pageB), (t) => t.some((v) => v.startsWith('live:') && !v.endsWith(':0x0')))
   // A tela em foco ocupa o palco (encosta na largura ou na altura disponível).
   // Mede a imagem visível (descontando as faixas pretas do object-contain)

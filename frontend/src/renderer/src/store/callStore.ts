@@ -13,6 +13,7 @@ import { CallMedia, type RemoteMedia } from '../lib/livekit'
 import { LIVEKIT_URL } from '../lib/config'
 import { retry } from '../lib/retry'
 import { callNotification } from '../lib/notifications'
+import { takeWindowAudio, type WindowAudio } from '../lib/windowAudio'
 import { loadAudioPrefs, resolveDeviceId, saveAudioPrefs } from '../lib/audioDevices'
 import { useChatStore } from './chatStore'
 import { useAuthStore } from './authStore'
@@ -141,6 +142,8 @@ let media: CallMedia | null = null
 
 // Compartilhamento de tela (não-reativo; o estado reativo é localScreenStream)
 let localScreenStream: MediaStream | null = null
+// Som só da janela compartilhada (Windows), quando o helper nativo captura
+let windowAudio: WindowAudio | null = null
 // Câmera local (não-reativa; o estado reativo é localCameraStream)
 let localCameraStream: MediaStream | null = null
 
@@ -283,6 +286,8 @@ export const useCallStore = create<CallState>()((set, get) => {
     stopLocalStream()
     localScreenStream?.getTracks().forEach((t) => t.stop())
     localScreenStream = null
+    windowAudio?.stop()
+    windowAudio = null
     localCameraStream?.getTracks().forEach((t) => t.stop())
     localCameraStream = null
     set({
@@ -570,10 +575,22 @@ export const useCallStore = create<CallState>()((set, get) => {
         }
         return
       }
+      // Janela no Windows: o som vem do helper (só o app da janela).
+      const captured = await takeWindowAudio()
       // A chamada pode ter acabado (ou mudado) com o seletor aberto.
       if (get().callId !== s.callId || get().status !== 'active') {
+        captured?.stop()
         stream.getTracks().forEach((t) => t.stop())
         return
+      }
+      if (captured) {
+        // O som da janela substitui qualquer som de sistema da captura.
+        stream.getAudioTracks().forEach((t) => {
+          stream.removeTrack(t)
+          t.stop()
+        })
+        windowAudio = captured
+        stream.addTrack(captured.track)
       }
 
       localScreenStream = stream
@@ -612,6 +629,8 @@ export const useCallStore = create<CallState>()((set, get) => {
       const callId = s.callId
       const stream = localScreenStream
       localScreenStream = null
+      windowAudio?.stop()
+      windowAudio = null
 
       if (stream) releaseStream(stream)
 

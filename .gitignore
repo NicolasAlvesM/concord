@@ -31,3 +31,7 @@ backend/concord-server
 # ─── Releases do app (scripts/release-win.sh) ───────────────────
 backend/updates/
 backend/.release-key
+
+# ─── Helper nativo (gerado no build) ────────────────────────────
+frontend/resources/win/
+native/concord-audio/target/

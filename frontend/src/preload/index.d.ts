@@ -15,6 +15,10 @@ export interface ScreenPickerApi {
   cancel(): void
 }
 
+export interface ScreenAudioApi {
+  stop(): void
+}
+
 export interface UpdatesApi {
   status(): Promise<string | null>
   onReady(cb: (version: string) => void): () => void
@@ -36,6 +40,11 @@ export interface BackgroundApi {
 declare global {
   interface Window {
     electron: ElectronAPI
-    api?: { screenPicker: ScreenPickerApi; background?: BackgroundApi; updates?: UpdatesApi }
+    api?: {
+      screenPicker: ScreenPickerApi
+      background?: BackgroundApi
+      updates?: UpdatesApi
+      screenAudio?: ScreenAudioApi
+    }
   }
 }

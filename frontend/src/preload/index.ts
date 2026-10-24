@@ -28,6 +28,12 @@ const api = {
       ipcRenderer.send('screen-picker:cancel')
     }
   },
+  screenAudio: {
+    /** Para a captura do som da janela (fim do compartilhamento). */
+    stop(): void {
+      ipcRenderer.send('screen-audio:stop')
+    }
+  },
   updates: {
     /** Versão pronta para instalar (já baixada e com assinatura válida). */
     status(): Promise<string | null> {
@@ -77,6 +83,12 @@ const api = {
     }
   }
 }
+
+// Som da janela compartilhada: o MessagePort não passa pelo contextBridge,
+// então vai ao mundo da página por window.postMessage (padrão do Electron).
+ipcRenderer.on('screen-audio:port', (event) => {
+  window.postMessage('concord:screen-audio-port', '*', event.ports)
+})
 
 // Use `contextBridge` APIs to expose Electron APIs to
 // renderer only if context isolation is enabled, otherwise

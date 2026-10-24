@@ -26,6 +26,20 @@ mkdir -p "$ROOT/frontend/dist"
 BUILD_TARGETS="${BUILD_TARGETS:-portable nsis}"
 UPDATE_URL="${SERVER_URL%/}/updates/"
 
+# Helper nativo do som da janela (Rust → concord-audio.exe), embutido no app.
+docker build -q -t concord-rust-win "$ROOT/native/concord-audio" >/dev/null
+docker run --rm \
+  -v "$ROOT/native/concord-audio:/src" \
+  -v concord-cargo-cache:/usr/local/cargo/registry \
+  -e HOST_UID="$(id -u)" -e HOST_GID="$(id -g)" \
+  -w /src concord-rust-win \
+  bash -euo pipefail -c '
+    cargo build --release --target x86_64-pc-windows-gnu
+    chown -R "$HOST_UID:$HOST_GID" target
+  '
+mkdir -p "$ROOT/frontend/resources/win"
+cp "$ROOT/native/concord-audio/target/x86_64-pc-windows-gnu/release/concord-audio.exe" "$ROOT/frontend/resources/win/"
+
 # O projeto é copiado para dentro do container (sem node_modules do host) e só
 # o resultado volta para frontend/dist — nada criado como root no repositório.
 docker run --rm \

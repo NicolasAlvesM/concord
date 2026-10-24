@@ -5,6 +5,7 @@ import icon from '../../resources/icon.png?asset'
 import { displayMediaStreams } from './displayMedia'
 import { attachCloseToTray, ensureSingleInstance, setupBackground, startHidden } from './background'
 import { setupUpdater } from './updater'
+import { hwndFromSourceId, registerScreenAudio, startWindowAudio } from './screenAudio'
 
 let mainWindow: BrowserWindow | null = null
 
@@ -44,6 +45,15 @@ function registerScreenShareHandlers(): void {
     try {
       const sources = await desktopCapturer.getSources({ types: ['screen', 'window'] })
       const source = sources.find((s) => s.id === sourceId)
+      // Janela no Windows: som só do app dela (helper nativo). Se o helper não
+      // subir (Windows antigo), cai no som do sistema sem o Concord.
+      const hwnd = source ? hwndFromSourceId(source.id) : null
+      if (source && hwnd && pendingAudioRequested && mainWindow) {
+        if (await startWindowAudio(hwnd, mainWindow.webContents)) {
+          callback({ video: source })
+          return
+        }
+      }
       if (source) {
         callback(displayMediaStreams(source, pendingAudioRequested, process.platform))
       } else {
@@ -114,6 +124,7 @@ app.whenReady().then(() => {
   electronApp.setAppUserModelId('com.concord.app')
 
   registerScreenShareHandlers()
+  registerScreenAudio()
   setupBackground(() => mainWindow, icon)
   setupUpdater(() => mainWindow, {
     feedUrl: __CONCORD_UPDATE_URL__,
