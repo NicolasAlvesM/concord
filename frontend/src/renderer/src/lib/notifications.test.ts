@@ -48,14 +48,14 @@ describe('callNotification', () => {
 })
 
 describe('mentionNotification', () => {
-  const me = { id: 'eu', username: 'nicccls' }
+  const me = { id: 'eu', username: 'fulano' }
   const inChannel = (over: Partial<Message> = {}): Message =>
-    dm({ conversation_id: null, channel_id: 'ch1', content: 'bora @nicccls?', ...over })
+    dm({ conversation_id: null, channel_id: 'ch1', content: 'bora @fulano?', ...over })
 
   it('menção em canal vira notificação que abre o canal', () => {
     expect(mentionNotification(inChannel(), me, 'srv1')).toEqual({
       title: 'Ana mencionou você',
-      body: 'bora @nicccls?',
+      body: 'bora @fulano?',
       route: '/servers/srv1/channels/ch1'
     })
   })
@@ -66,6 +66,6 @@ describe('mentionNotification', () => {
   })
 
   it('DM já tem a própria notificação', () => {
-    expect(mentionNotification(dm({ content: '@nicccls oi' }), me, null)).toBeNull()
+    expect(mentionNotification(dm({ content: '@fulano oi' }), me, null)).toBeNull()
   })
 })

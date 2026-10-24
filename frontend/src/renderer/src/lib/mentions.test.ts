@@ -3,15 +3,15 @@ import { applyMention, mentionQuery, mentionsUser, splitMentions } from './menti
 
 describe('mentionsUser', () => {
   it('reconhece @nick no começo, no meio e com pontuação', () => {
-    expect(mentionsUser('@nicccls bora?', 'nicccls')).toBe(true)
-    expect(mentionsUser('valeu @nicccls!', 'nicccls')).toBe(true)
-    expect(mentionsUser('ei @NICCCLS', 'nicccls')).toBe(true)
+    expect(mentionsUser('@fulano bora?', 'fulano')).toBe(true)
+    expect(mentionsUser('valeu @fulano!', 'fulano')).toBe(true)
+    expect(mentionsUser('ei @FULANO', 'fulano')).toBe(true)
   })
 
   it('não confunde com nick maior, e-mail ou texto sem @', () => {
-    expect(mentionsUser('@nicccls2 oi', 'nicccls')).toBe(false)
-    expect(mentionsUser('fulano@nicccls.com', 'nicccls')).toBe(false)
-    expect(mentionsUser('nicccls sem arroba', 'nicccls')).toBe(false)
+    expect(mentionsUser('@fulano2 oi', 'fulano')).toBe(false)
+    expect(mentionsUser('fulano@fulano.com', 'fulano')).toBe(false)
+    expect(mentionsUser('fulano sem arroba', 'fulano')).toBe(false)
   })
 })
 
@@ -46,8 +46,8 @@ describe('mentionQuery', () => {
 
 describe('applyMention', () => {
   it('troca o que foi digitado pelo @nick e um espaço', () => {
-    expect(applyMention('fala @ni tudo bem', 5, 8, 'nicccls')).toEqual({
-      text: 'fala @nicccls  tudo bem',
+    expect(applyMention('fala @ni tudo bem', 5, 8, 'fulano')).toEqual({
+      text: 'fala @fulano  tudo bem',
       caret: 14
     })
   })
