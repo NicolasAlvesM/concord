@@ -6,6 +6,27 @@
 import { createRequire } from 'module'
 const require = createRequire(new URL('../frontend/package.json', import.meta.url))
 const { chromium } = require('playwright')
+const { writeFileSync } = require('fs')
+const { tmpdir } = require('os')
+const { join } = require('path')
+
+// Tom contínuo como "microfone": o bipe padrão do Chromium é curto demais
+// para a detecção de fala do LiveKit.
+function writeToneWav(path, seconds = 10, rate = 48000) {
+  const samples = seconds * rate
+  const buf = Buffer.alloc(44 + samples * 2)
+  buf.write('RIFF', 0); buf.writeUInt32LE(36 + samples * 2, 4); buf.write('WAVE', 8)
+  buf.write('fmt ', 12); buf.writeUInt32LE(16, 16); buf.writeUInt16LE(1, 20); buf.writeUInt16LE(1, 22)
+  buf.writeUInt32LE(rate, 24); buf.writeUInt32LE(rate * 2, 28); buf.writeUInt16LE(2, 32); buf.writeUInt16LE(16, 34)
+  buf.write('data', 36); buf.writeUInt32LE(samples * 2, 40)
+  for (let i = 0; i < samples; i++) {
+    const env = 0.6 + 0.4 * Math.sin((2 * Math.PI * 3 * i) / rate)
+    buf.writeInt16LE(Math.round(12000 * env * Math.sin((2 * Math.PI * 440 * i) / rate)), 44 + i * 2)
+  }
+  writeFileSync(path, buf)
+}
+const TONE = join(tmpdir(), 'concord-e2e-tone.wav')
+writeToneWav(TONE)
 
 const API = process.env.API ?? 'http://localhost:8080/api'
 const APP = process.env.APP ?? 'http://localhost:5174/'
@@ -54,13 +75,17 @@ const browser = await chromium.launch({
   args: [
     '--use-fake-device-for-media-stream',
     '--use-fake-ui-for-media-stream',
+    `--use-file-for-fake-audio-capture=${TONE}`,
     '--auto-select-desktop-capture-source=Entire screen',
     '--autoplay-policy=no-user-gesture-required'
   ]
 })
 
 async function openClient(user) {
-  const context = await browser.newContext({ permissions: ['microphone', 'camera'] })
+  const context = await browser.newContext({
+    permissions: ['microphone', 'camera'],
+    viewport: { width: 2560, height: 1440 }
+  })
   const page = await context.newPage()
   page.on('response', (r) => { if (r.status() === 404) console.log(`[${user.username}] 404:`, r.url()) })
   page.on('console', (m) => { if (m.type() === 'error') console.log(`[${user.username}] console:`, m.text()) })
@@ -102,9 +127,28 @@ try {
 
   await waitFor('ana ouve a bia', () => audioTracks(pageA), (t) => t.includes('live'))
   await waitFor('bia ouve a ana', () => audioTracks(pageB), (t) => t.includes('live'))
+  // O microfone fake emite um bipe: o próprio usuário fica verde na lista do canal.
+  await waitFor('ana se vê falando (verde na lista do canal)', () => pageA.evaluate(() =>
+    [...document.querySelectorAll('span')].some((el) =>
+      el.textContent?.includes('(você)') &&
+      el.previousElementSibling?.className.includes('ring-[#23a55a]'))), (ok) => ok === true)
 
   await pageA.getByRole('button', { name: 'Compartilhar tela' }).click()
   await waitFor('bia vê a tela da ana', () => videoTracks(pageB), (t) => t.some((v) => v.startsWith('live:') && !v.endsWith(':0x0')))
+  // A tela em foco ocupa o palco (encosta na largura ou na altura disponível).
+  // Mede a imagem visível (descontando as faixas pretas do object-contain)
+  // contra a área inteira da view de voz.
+  await waitFor('tela em foco ocupa a área do palco', () => pageB.evaluate(() => {
+    const videos = [...document.querySelectorAll('video')].filter((v) => v.videoWidth > 0)
+    const video = videos.sort((a, b) => b.clientWidth * b.clientHeight - a.clientWidth * a.clientHeight)[0]
+    const area = video?.closest('.overflow-y-auto')
+    if (!video || !area) return null
+    const ar = video.videoWidth / video.videoHeight
+    const box = video.getBoundingClientRect()
+    const w = Math.min(box.width, box.height * ar)
+    const a = area.getBoundingClientRect()
+    return { w: +(w / a.width).toFixed(2), h: +((w / ar) / a.height).toFixed(2) }
+  }), (r) => r !== null && (r.w >= 0.85 || r.h >= 0.7))
 
   await pageB.getByRole('button', { name: 'Compartilhar tela' }).click()
   await waitFor('ana vê a tela da bia (duas telas ao mesmo tempo)', () => videoTracks(pageA), (t) => t.filter((v) => v.startsWith('live:') && !v.endsWith(':0x0')).length >= 2)

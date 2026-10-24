@@ -19,7 +19,6 @@ function DmCallView({ children }: { children?: React.ReactNode }): React.JSX.Ele
   const status = useCallStore((s) => s.status)
   const type = useCallStore((s) => s.type)
   const participants = useCallStore((s) => s.participants)
-  const streams = useCallStore((s) => s.streams)
   const muted = useCallStore((s) => s.muted)
   const deafened = useCallStore((s) => s.deafened)
   const startedAt = useCallStore((s) => s.startedAt)
@@ -33,7 +32,7 @@ function DmCallView({ children }: { children?: React.ReactNode }): React.JSX.Ele
 
   const dmActive = type === 'dm' && status === 'active'
   const elapsed = useElapsed(dmActive ? startedAt : null)
-  const speaking = useSpeaking(dmActive && !deafened ? streams : {})
+  const speaking = useSpeaking()
 
   const peer = participants[0]
   if (type !== 'dm' || !peer) return null

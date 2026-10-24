@@ -33,6 +33,7 @@ function CallStage({
   const videoStreams = useCallStore((s) => s.videoStreams)
 
   const meId = me?.id ?? 'me'
+  const meSpeaking = !muted && (speaking?.has(meId) ?? false)
   const meInfo: CallUserInfo = {
     id: meId,
     username: me?.username ?? '',
@@ -58,7 +59,13 @@ function CallStage({
   if (!hasScreens) {
     return (
       <div className={`flex flex-wrap items-center justify-center ${gap}`}>
-        <ParticipantTile user={meInfo} selfMuted={muted} videoStream={localCameraStream} mirror />
+        <ParticipantTile
+          user={meInfo}
+          selfMuted={muted}
+          speaking={meSpeaking}
+          videoStream={localCameraStream}
+          mirror
+        />
         {participants.map((p) => (
           <ParticipantTile
             key={p.id}
@@ -86,7 +93,7 @@ function CallStage({
             onClick={() => setFocused(entry.userId)}
           />
         ))}
-        <ParticipantTile user={meInfo} selfMuted={muted} />
+        <ParticipantTile user={meInfo} selfMuted={muted} speaking={meSpeaking} />
         {participants
           .filter((p) => !screenStreams[p.id])
           .map((p) => (
@@ -98,8 +105,8 @@ function CallStage({
 
   // Foco grande (estilo Go Live) + strip com os demais.
   return (
-    <div className="flex h-full w-full max-w-6xl flex-col gap-4">
-      <div className="relative min-h-0 flex-1">
+    <div className="flex h-full w-full flex-col gap-4">
+      <div className="relative flex min-h-0 flex-1 items-center justify-center [container-type:size]">
         <div className="absolute inset-x-0 top-0 z-10 flex items-start justify-between px-1">
           <button
             onClick={() => setFocused(null)}
@@ -133,6 +140,7 @@ function CallStage({
         <ParticipantTile
           user={meInfo}
           selfMuted={muted}
+          speaking={meSpeaking}
           size="md"
           videoStream={localCameraStream}
           mirror

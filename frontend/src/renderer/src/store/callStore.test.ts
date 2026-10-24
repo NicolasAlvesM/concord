@@ -242,4 +242,25 @@ describe('callStore — mídia via LiveKit', () => {
     expect(afterConnect.at(-1)).toBe('mic(false)')
     expect(useCallStore.getState().muted).toBe(false)
   })
+
+  it('marca quem está falando, incluindo o próprio usuário', async () => {
+    await joinChannel()
+    const handlers = media.instances[0].handlers as { onActiveSpeakers: (ids: string[]) => void }
+
+    handlers.onActiveSpeakers(['eu', 'ana'])
+    expect(useCallStore.getState().speakingIds).toEqual(['eu', 'ana'])
+
+    handlers.onActiveSpeakers([])
+    expect(useCallStore.getState().speakingIds).toEqual([])
+  })
+
+  it('limpa quem está falando ao sair da chamada', async () => {
+    await joinChannel()
+    const handlers = media.instances[0].handlers as { onActiveSpeakers: (ids: string[]) => void }
+    handlers.onActiveSpeakers(['eu'])
+
+    useCallStore.getState().endCall()
+
+    expect(useCallStore.getState().speakingIds).toEqual([])
+  })
 })

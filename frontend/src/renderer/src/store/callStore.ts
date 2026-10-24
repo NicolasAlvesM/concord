@@ -85,6 +85,8 @@ interface CallState {
   localCameraStream: MediaStream | null
   /** quem está compartilhando tela segundo o backend (registry) */
   screenSharers: string[]
+  /** userIds falando agora (detecção do LiveKit; inclui o próprio usuário) */
+  speakingIds: string[]
   /** tela em foco no layout expandido (estilo Go Live) */
   focusedScreenUserId: string | null
   muted: boolean
@@ -197,6 +199,9 @@ export const useCallStore = create<CallState>()((set, get) => {
       },
       onReconnected: () => {
         if (media === connection) showToast.info('Chamada reconectada.')
+      },
+      onActiveSpeakers: (userIds) => {
+        if (media === connection) set({ speakingIds: userIds })
       }
     })
     media = connection
@@ -265,6 +270,7 @@ export const useCallStore = create<CallState>()((set, get) => {
       isScreenSharing: false,
       localCameraStream: null,
       screenSharers: [],
+      speakingIds: [],
       focusedScreenUserId: null,
       muted: false,
       deafened: false,
@@ -285,6 +291,7 @@ export const useCallStore = create<CallState>()((set, get) => {
     isScreenSharing: false,
     localCameraStream: null,
     screenSharers: [],
+    speakingIds: [],
     focusedScreenUserId: null,
     muted: false,
     deafened: false,

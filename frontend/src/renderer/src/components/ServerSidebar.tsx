@@ -41,6 +41,7 @@ export function ServerSidebar(): React.JSX.Element {
   const activeCallType = useCallStore((s) => s.type)
   const activeCallChannelId = useCallStore((s) => s.channelId)
   const callListVersion = useCallStore((s) => s.listVersion)
+  const speakingIds = useCallStore((s) => s.speakingIds)
   const serverCalls = useCallStore((s) => s.serverCalls)
   const joinVoiceChannel = useCallStore((s) => s.joinVoiceChannel)
 
@@ -430,6 +431,8 @@ export function ServerSidebar(): React.JSX.Element {
                         {participants.map((p) => {
                           const name = p.display_name ?? p.username ?? 'Usuário'
                           const isMe = p.user_id === user?.id
+                          // Só sabemos quem fala no canal em que estamos conectados.
+                          const talking = connectedHere && speakingIds.includes(p.user_id)
                           return (
                             <div
                               key={p.user_id}
@@ -437,7 +440,11 @@ export function ServerSidebar(): React.JSX.Element {
                                 isMe ? 'bg-white/5' : ''
                               }`}
                             >
-                              <div className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-violet-600 text-[9px] font-bold text-white">
+                              <div
+                                className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-violet-600 text-[9px] font-bold text-white transition-shadow ${
+                                  talking ? 'ring-2 ring-[#23a55a]' : ''
+                                }`}
+                              >
                                 {name.charAt(0).toUpperCase()}
                               </div>
                               <span className="truncate text-xs font-medium text-gray-300">
