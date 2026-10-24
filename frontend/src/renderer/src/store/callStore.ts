@@ -54,6 +54,18 @@ interface ScreenSharePayload {
   active: boolean
 }
 
+interface VoicePayload {
+  call_id: string
+  user_id: string
+  muted: boolean
+  deafened: boolean
+}
+
+export interface VoiceState {
+  muted: boolean
+  deafened: boolean
+}
+
 interface EndedPayload {
   call_id: string
 }
@@ -85,6 +97,8 @@ interface CallState {
   localCameraStream: MediaStream | null
   /** quem está compartilhando tela segundo o backend (registry) */
   screenSharers: string[]
+  /** userId -> mudo/ensurdecido dos outros participantes (evento call:voice) */
+  voiceStates: Record<string, VoiceState>
   /** userIds falando agora (detecção do LiveKit; inclui o próprio usuário) */
   speakingIds: string[]
   /** tela em foco no layout expandido (estilo Go Live) */
@@ -122,6 +136,9 @@ let media: CallMedia | null = null
 let localScreenStream: MediaStream | null = null
 // Câmera local (não-reativa; o estado reativo é localCameraStream)
 let localCameraStream: MediaStream | null = null
+
+/** Mute de antes de ensurdecer — volta a ele ao desensurdecer (como no Discord). */
+let mutedBeforeDeafen = false
 
 const TOKEN_ATTEMPTS = 10
 const TOKEN_RETRY_DELAY_MS = 400
@@ -271,11 +288,27 @@ export const useCallStore = create<CallState>()((set, get) => {
       localCameraStream: null,
       screenSharers: [],
       speakingIds: [],
+      voiceStates: {},
       focusedScreenUserId: null,
       muted: false,
       deafened: false,
       startedAt: null
     })
+  }
+
+  /** Aplica o mute no microfone local e na sala. */
+  const applyMute = (muted: boolean): void => {
+    localStream?.getAudioTracks().forEach((track) => {
+      track.enabled = !muted
+    })
+    void media?.setMicMuted(muted).catch(() => {})
+  }
+
+  /** Avisa o servidor (e por ele os demais) do mute/ensurdecer atual. */
+  const sendVoiceState = (): void => {
+    const { callId, muted, deafened } = get()
+    if (!callId) return
+    useChatStore.getState().sendEvent('call:voice', { call_id: callId, muted, deafened })
   }
 
   return {
@@ -292,6 +325,7 @@ export const useCallStore = create<CallState>()((set, get) => {
     localCameraStream: null,
     screenSharers: [],
     speakingIds: [],
+    voiceStates: {},
     focusedScreenUserId: null,
     muted: false,
     deafened: false,
@@ -374,6 +408,15 @@ export const useCallStore = create<CallState>()((set, get) => {
             const sharing = state.screen_sharing ?? []
             set((s) => ({
               screenSharers: sharing,
+              voiceStates: {
+                ...Object.fromEntries(
+                  others.map((p) => [
+                    p.user_id,
+                    { muted: p.muted ?? false, deafened: p.deafened ?? false }
+                  ])
+                ),
+                ...s.voiceStates
+              },
               focusedScreenUserId: s.focusedScreenUserId ?? sharing[0] ?? null,
               participants: [
                 ...s.participants,
@@ -449,15 +492,23 @@ export const useCallStore = create<CallState>()((set, get) => {
 
     toggleMute: () => {
       const next = !get().muted
-      localStream?.getAudioTracks().forEach((track) => {
-        track.enabled = !next
-      })
-      set({ muted: next })
-      void media?.setMicMuted(next)
+      // Desmutar enquanto ensurdecido também tira o ensurdecer.
+      set(next ? { muted: true } : { muted: false, deafened: false })
+      applyMute(next)
+      sendVoiceState()
     },
 
     toggleDeafen: () => {
-      set({ deafened: !get().deafened })
+      const next = !get().deafened
+      if (next) {
+        mutedBeforeDeafen = get().muted
+        set({ deafened: true, muted: true })
+        applyMute(true)
+      } else {
+        set({ deafened: false, muted: mutedBeforeDeafen })
+        applyMute(mutedBeforeDeafen)
+      }
+      sendVoiceState()
     },
 
     startScreenShare: async () => {
@@ -655,6 +706,30 @@ export const useCallStore = create<CallState>()((set, get) => {
           if (get().callId !== p.call_id) return
           showToast.info(`${p.user.display_name} recusou a chamada.`)
           cleanup()
+          return
+        }
+
+        case 'call:voice': {
+          const p = payload as unknown as VoicePayload
+          const state = { muted: p.muted, deafened: p.deafened }
+          set((s) => {
+            // Lista dos canais de voz do servidor (inclusive de chamadas em que não estou).
+            const serverCalls = { ...s.serverCalls }
+            for (const [channelId, entry] of Object.entries(serverCalls)) {
+              if (entry.call?.id !== p.call_id) continue
+              serverCalls[channelId] = {
+                ...entry,
+                participants: entry.participants.map((q) =>
+                  q.user_id === p.user_id ? { ...q, ...state } : q
+                )
+              }
+            }
+            return {
+              serverCalls,
+              voiceStates:
+                s.callId === p.call_id ? { ...s.voiceStates, [p.user_id]: state } : s.voiceStates
+            }
+          })
           return
         }
 

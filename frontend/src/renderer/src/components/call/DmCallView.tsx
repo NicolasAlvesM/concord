@@ -6,6 +6,7 @@ import {
   ChevronDownIcon,
   ChevronUpIcon,
   HeadsetIcon,
+  HeadsetOffIcon,
   MicIcon,
   MicOffIcon,
   PhoneOffIcon
@@ -100,7 +101,11 @@ function DmCallView({ children }: { children?: React.ReactNode }): React.JSX.Ele
                   : 'bg-white/5 text-gray-300 hover:bg-white/10 hover:text-white'
               }`}
             >
-              <HeadsetIcon className="h-4 w-4" />
+              {deafened ? (
+                <HeadsetOffIcon className="h-4 w-4" />
+              ) : (
+                <HeadsetIcon className="h-4 w-4" />
+              )}
             </button>
             <button
               onClick={endCall}

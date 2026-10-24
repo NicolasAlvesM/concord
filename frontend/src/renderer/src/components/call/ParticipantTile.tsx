@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import type { CallUserInfo } from '../../store/callStore'
-import { MicOffIcon } from '../icons'
+import VoiceStateIcons from './VoiceStateIcons'
 
 function VideoFill({
   stream,
@@ -55,6 +55,7 @@ function ParticipantTile({
   user,
   speaking = false,
   selfMuted = false,
+  deafened = false,
   videoStream = null,
   size = 'lg',
   isScreen = false,
@@ -64,6 +65,7 @@ function ParticipantTile({
   user: CallUserInfo
   speaking?: boolean
   selfMuted?: boolean
+  deafened?: boolean
   /** Stream de vídeo (tela/câmera) exibido dentro do tile. */
   videoStream?: MediaStream | null
   size?: 'md' | 'lg' | 'fill'
@@ -122,7 +124,7 @@ function ParticipantTile({
         </div>
       )}
       <div className="absolute bottom-2 left-2 flex max-w-[calc(100%-1rem)] items-center gap-1.5 rounded-md bg-black/60 px-2 py-1 backdrop-blur-sm">
-        {selfMuted && <MicOffIcon className="h-3 w-3 shrink-0 text-red-400" />}
+        <VoiceStateIcons muted={selfMuted} deafened={deafened} className="h-3 w-3" />
         <span className="truncate text-xs font-semibold text-white">{user.display_name}</span>
       </div>
     </div>

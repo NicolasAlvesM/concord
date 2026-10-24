@@ -7,6 +7,7 @@ import { useInviteStore } from '../store/inviteStore'
 import { useUIStore } from '../store/uiStore'
 import { useChatStore } from '../store/chatStore'
 import { useCallStore } from '../store/callStore'
+import VoiceStateIcons from './call/VoiceStateIcons'
 import { logout } from '../api/auth'
 import type { Channel, ChannelType } from '../api/channels'
 import { listActiveServerCalls, type CallStateResponse } from '../api/calls'
@@ -42,6 +43,8 @@ export function ServerSidebar(): React.JSX.Element {
   const activeCallChannelId = useCallStore((s) => s.channelId)
   const callListVersion = useCallStore((s) => s.listVersion)
   const speakingIds = useCallStore((s) => s.speakingIds)
+  const selfMuted = useCallStore((s) => s.muted)
+  const selfDeafened = useCallStore((s) => s.deafened)
   const serverCalls = useCallStore((s) => s.serverCalls)
   const joinVoiceChannel = useCallStore((s) => s.joinVoiceChannel)
 
@@ -450,6 +453,12 @@ export function ServerSidebar(): React.JSX.Element {
                               <span className="truncate text-xs font-medium text-gray-300">
                                 {name}
                                 {isMe ? ' (você)' : ''}
+                              </span>
+                              <span className="ml-auto pr-1">
+                                <VoiceStateIcons
+                                  muted={isMe && connectedHere ? selfMuted : p.muted}
+                                  deafened={isMe && connectedHere ? selfDeafened : p.deafened}
+                                />
                               </span>
                             </div>
                           )

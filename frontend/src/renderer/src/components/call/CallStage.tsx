@@ -25,6 +25,8 @@ function CallStage({
   const me = useAuthStore((s) => s.user)
   const participants = useCallStore((s) => s.participants)
   const muted = useCallStore((s) => s.muted)
+  const deafened = useCallStore((s) => s.deafened)
+  const voiceStates = useCallStore((s) => s.voiceStates)
   const localScreenStream = useCallStore((s) => s.localScreenStream)
   const screenStreams = useCallStore((s) => s.screenStreams)
   const focusedId = useCallStore((s) => s.focusedScreenUserId)
@@ -62,6 +64,7 @@ function CallStage({
         <ParticipantTile
           user={meInfo}
           selfMuted={muted}
+          deafened={deafened}
           speaking={meSpeaking}
           videoStream={localCameraStream}
           mirror
@@ -70,6 +73,8 @@ function CallStage({
           <ParticipantTile
             key={p.id}
             user={p}
+            selfMuted={voiceStates[p.id]?.muted}
+            deafened={voiceStates[p.id]?.deafened}
             speaking={speaking?.has(p.id) ?? false}
             videoStream={videoStreams[p.id] ?? null}
           />
@@ -93,11 +98,22 @@ function CallStage({
             onClick={() => setFocused(entry.userId)}
           />
         ))}
-        <ParticipantTile user={meInfo} selfMuted={muted} speaking={meSpeaking} />
+        <ParticipantTile
+          user={meInfo}
+          selfMuted={muted}
+          deafened={deafened}
+          speaking={meSpeaking}
+        />
         {participants
           .filter((p) => !screenStreams[p.id])
           .map((p) => (
-            <ParticipantTile key={p.id} user={p} speaking={speaking?.has(p.id) ?? false} />
+            <ParticipantTile
+              key={p.id}
+              user={p}
+              selfMuted={voiceStates[p.id]?.muted}
+              deafened={voiceStates[p.id]?.deafened}
+              speaking={speaking?.has(p.id) ?? false}
+            />
           ))}
       </div>
     )
@@ -140,6 +156,7 @@ function CallStage({
         <ParticipantTile
           user={meInfo}
           selfMuted={muted}
+          deafened={deafened}
           speaking={meSpeaking}
           size="md"
           videoStream={localCameraStream}
@@ -151,6 +168,8 @@ function CallStage({
             <ParticipantTile
               key={p.id}
               user={p}
+              selfMuted={voiceStates[p.id]?.muted}
+              deafened={voiceStates[p.id]?.deafened}
               size="md"
               speaking={speaking?.has(p.id) ?? false}
               videoStream={videoStreams[p.id] ?? null}

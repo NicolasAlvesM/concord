@@ -263,4 +263,63 @@ describe('callStore — mídia via LiveKit', () => {
 
     expect(useCallStore.getState().speakingIds).toEqual([])
   })
+
+  it('ensurdecer também muta, e voltar restaura o mute anterior (como no Discord)', async () => {
+    await joinChannel()
+
+    useCallStore.getState().toggleDeafen()
+    expect(useCallStore.getState()).toMatchObject({ deafened: true, muted: true })
+
+    useCallStore.getState().toggleDeafen()
+    expect(useCallStore.getState()).toMatchObject({ deafened: false, muted: false })
+  })
+
+  it('desmutar enquanto ensurdecido também tira o ensurdecer', async () => {
+    await joinChannel()
+    useCallStore.getState().toggleDeafen()
+
+    useCallStore.getState().toggleMute()
+
+    expect(useCallStore.getState()).toMatchObject({ deafened: false, muted: false })
+  })
+
+  it('avisa o servidor ao mutar e ensurdecer', async () => {
+    await joinChannel()
+    chat.sendEvent.mockClear()
+
+    useCallStore.getState().toggleMute()
+    expect(chat.sendEvent).toHaveBeenLastCalledWith('call:voice', {
+      call_id: 'call-1',
+      muted: true,
+      deafened: false
+    })
+
+    useCallStore.getState().toggleDeafen()
+    expect(chat.sendEvent).toHaveBeenLastCalledWith('call:voice', {
+      call_id: 'call-1',
+      muted: true,
+      deafened: true
+    })
+  })
+
+  it('mostra quem está mudo/ensurdecido a partir do evento call:voice', async () => {
+    await joinChannel()
+    useCallStore.getState().setServerCalls({
+      'canal-1': {
+        call: { id: 'call-1' } as never,
+        participants: [{ call_id: 'call-1', user_id: 'ana', role: 'member', joined_at: '' }]
+      }
+    })
+
+    useCallStore.getState().handleWsEvent({
+      type: 'call:voice',
+      payload: { call_id: 'call-1', user_id: 'ana', muted: true, deafened: true }
+    })
+
+    expect(useCallStore.getState().voiceStates.ana).toEqual({ muted: true, deafened: true })
+    expect(useCallStore.getState().serverCalls['canal-1'].participants[0]).toMatchObject({
+      muted: true,
+      deafened: true
+    })
+  })
 })

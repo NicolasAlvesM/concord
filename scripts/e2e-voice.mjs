@@ -133,6 +133,22 @@ try {
       el.textContent?.includes('(você)') &&
       el.previousElementSibling?.className.includes('ring-[#23a55a]'))), (ok) => ok === true)
 
+  // Mudo/ensurdecido aparece ao lado do nome para os outros (como no Discord).
+  const voiceIcons = (page, name) => page.evaluate((n) => {
+    const row = [...document.querySelectorAll('span')].find((el) => el.textContent === n)?.parentElement
+    const icons = row?.querySelector('[title]')
+    return icons ? icons.getAttribute('title') : 'nenhum'
+  }, name)
+  await pageA.getByRole('button', { name: 'Silenciar microfone' }).first().click()
+  await waitFor('bia vê a ana mutada', () => voiceIcons(pageB, 'ana'), (t) => t === 'Microfone desativado')
+  await pageA.getByRole('button', { name: 'Ficar surdo' }).first().click()
+  await waitFor('bia vê a ana ensurdecida', () => voiceIcons(pageB, 'ana'), (t) => t === 'Áudio e microfone desativados')
+  // Como no Discord: sair do ensurdecer volta ao mute de antes (ela estava mutada).
+  await pageA.getByRole('button', { name: 'Desativar surdez' }).first().click()
+  await waitFor('bia vê a ana de volta só mutada', () => voiceIcons(pageB, 'ana'), (t) => t === 'Microfone desativado')
+  await pageA.getByRole('button', { name: 'Ativar microfone' }).first().click()
+  await waitFor('bia vê a ana com som de novo', () => voiceIcons(pageB, 'ana'), (t) => t === 'nenhum')
+
   await pageA.getByRole('button', { name: 'Compartilhar tela' }).click()
   await waitFor('bia vê a tela da ana', () => videoTracks(pageB), (t) => t.some((v) => v.startsWith('live:') && !v.endsWith(':0x0')))
   // A tela em foco ocupa o palco (encosta na largura ou na altura disponível).
