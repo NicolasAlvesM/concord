@@ -28,6 +28,20 @@ const api = {
       ipcRenderer.send('screen-picker:cancel')
     }
   },
+  updates: {
+    /** Versão pronta para instalar (já baixada e com assinatura válida). */
+    status(): Promise<string | null> {
+      return ipcRenderer.invoke('update:status')
+    },
+    onReady(cb: (version: string) => void): () => void {
+      const listener = (_e: unknown, version: string): void => cb(version)
+      ipcRenderer.on('update:ready', listener)
+      return () => ipcRenderer.removeListener('update:ready', listener)
+    },
+    install(): void {
+      ipcRenderer.send('update:install')
+    }
+  },
   background: {
     /** Estado da chamada para o menu da bandeja. */
     setCallState(state: { inCall: boolean; muted: boolean }): void {

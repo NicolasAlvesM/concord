@@ -15,6 +15,12 @@ export interface ScreenPickerApi {
   cancel(): void
 }
 
+export interface UpdatesApi {
+  status(): Promise<string | null>
+  onReady(cb: (version: string) => void): () => void
+  install(): void
+}
+
 export interface BackgroundApi {
   setCallState(state: { inCall: boolean; muted: boolean }): void
   notify(payload: { title: string; body: string; route: string; urgent?: boolean }): void
@@ -30,6 +36,6 @@ export interface BackgroundApi {
 declare global {
   interface Window {
     electron: ElectronAPI
-    api?: { screenPicker: ScreenPickerApi; background?: BackgroundApi }
+    api?: { screenPicker: ScreenPickerApi; background?: BackgroundApi; updates?: UpdatesApi }
   }
 }

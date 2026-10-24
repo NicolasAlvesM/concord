@@ -21,6 +21,20 @@ interface NotifyPayload {
 let tray: Tray | null = null
 let quitting = false
 let callState: CallState = { inCall: false, muted: false }
+const callStateListeners = new Set<(state: CallState) => void>()
+
+export function isInCall(): boolean {
+  return callState.inCall
+}
+
+export function onCallStateChange(listener: (state: CallState) => void): void {
+  callStateListeners.add(listener)
+}
+
+/** Daqui em diante fechar a janela fecha o app (ex.: instalar atualização). */
+export function markQuitting(): void {
+  quitting = true
+}
 
 const prefsPath = (): string => join(app.getPath('userData'), 'background.json')
 
@@ -127,6 +141,7 @@ export function setupBackground(getWindow: () => BrowserWindow | null, icon: str
   ipcMain.on('call:state', (_e, state: CallState) => {
     callState = state
     rebuildTrayMenu(getWindow)
+    callStateListeners.forEach((listener) => listener(state))
   })
 
   ipcMain.on('app:quit', () => {

@@ -4,6 +4,7 @@ import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
 import { displayMediaStreams } from './displayMedia'
 import { attachCloseToTray, ensureSingleInstance, setupBackground, startHidden } from './background'
+import { setupUpdater } from './updater'
 
 let mainWindow: BrowserWindow | null = null
 
@@ -114,6 +115,10 @@ app.whenReady().then(() => {
 
   registerScreenShareHandlers()
   setupBackground(() => mainWindow, icon)
+  setupUpdater(() => mainWindow, {
+    feedUrl: __CONCORD_UPDATE_URL__,
+    publicKeyPem: __CONCORD_UPDATE_PUBKEY__
+  })
 
   // Default open or close DevTools by F12 in development
   // and ignore CommandOrControl + R in production.
