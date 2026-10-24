@@ -26,8 +26,10 @@ function UpdateNotice(): React.JSX.Element | null {
 
   const install = (): void => {
     // Sai da chamada antes (avisa os outros) — o app reinicia para instalar.
+    const inCall = useCallStore.getState().status !== 'idle'
     useCallStore.getState().endCall()
-    updates.install()
+    // pausa curta para o "saí da chamada" sair pelo WebSocket
+    setTimeout(() => updates.install(), inCall ? 250 : 0)
   }
 
   return (

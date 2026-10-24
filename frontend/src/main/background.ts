@@ -19,6 +19,8 @@ interface NotifyPayload {
 }
 
 let tray: Tray | null = null
+// Notificações vivas: sem referência o GC do Windows as coleta e o clique some.
+const activeNotifications = new Set<Notification>()
 let quitting = false
 let callState: CallState = { inCall: false, muted: false }
 const callStateListeners = new Set<(state: CallState) => void>()
@@ -165,10 +167,13 @@ export function setupBackground(getWindow: () => BrowserWindow | null, icon: str
     if (!win || !Notification.isSupported()) return
     if (!shouldNotify({ visible: win.isVisible(), focused: win.isFocused() })) return
     const notification = new Notification({ title: payload.title, body: payload.body, icon })
+    activeNotifications.add(notification)
     notification.on('click', () => {
+      activeNotifications.delete(notification)
       showWindow(win)
       win.webContents.send('navigate', payload.route)
     })
+    notification.on('close', () => activeNotifications.delete(notification))
     notification.show()
     if (payload.urgent) win.flashFrame(true)
   })
