@@ -48,7 +48,7 @@ describe('applyMention', () => {
   it('troca o que foi digitado pelo @nick e um espaço', () => {
     expect(applyMention('fala @ni tudo bem', 5, 8, 'fulano')).toEqual({
       text: 'fala @fulano  tudo bem',
-      caret: 14
+      caret: 13
     })
   })
 })
