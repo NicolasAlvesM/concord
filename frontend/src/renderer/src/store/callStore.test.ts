@@ -73,6 +73,7 @@ vi.mock('../lib/livekit', () => ({
       media.events.push(`mic(${muted})`)
     })
     unpublish = vi.fn(async () => {})
+    replaceMic = vi.fn(async () => {})
     disconnect = vi.fn()
     constructor(handlers: unknown) {
       this.handlers = handlers
@@ -321,5 +322,43 @@ describe('callStore — mídia via LiveKit', () => {
       muted: true,
       deafened: true
     })
+  })
+
+  it('troca o microfone no meio da chamada sem sair da sala', async () => {
+    const first = fakeStream('audio')
+    const second = fakeStream('audio')
+    rtc.getAudioStream.mockResolvedValueOnce(first).mockResolvedValueOnce(second)
+    await joinChannel()
+
+    await useCallStore.getState().setInputDevice('mic-usb')
+
+    expect(rtc.getAudioStream).toHaveBeenLastCalledWith('mic-usb')
+    expect(media.instances[0].replaceMic).toHaveBeenCalledWith(second.getAudioTracks()[0])
+    expect(allStopped(first)).toBe(true)
+    expect(useCallStore.getState().inputDeviceId).toBe('mic-usb')
+    expect(useCallStore.getState().status).toBe('active')
+  })
+
+  it('o microfone novo respeita o mute atual', async () => {
+    const second = fakeStream('audio')
+    rtc.getAudioStream.mockResolvedValueOnce(fakeStream('audio')).mockResolvedValueOnce(second)
+    await joinChannel()
+    useCallStore.getState().toggleMute()
+
+    await useCallStore.getState().setInputDevice('mic-usb')
+
+    expect((second.getAudioTracks()[0] as unknown as FakeTrack).enabled).toBe(false)
+  })
+
+  it('entra na chamada já com o microfone escolhido', async () => {
+    await useCallStore.getState().setInputDevice('mic-usb')
+    await joinChannel()
+
+    expect(rtc.getAudioStream).toHaveBeenLastCalledWith('mic-usb')
+  })
+
+  it('guarda a saída de áudio escolhida', () => {
+    useCallStore.getState().setOutputDevice('fone')
+    expect(useCallStore.getState().outputDeviceId).toBe('fone')
   })
 })

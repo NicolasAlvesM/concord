@@ -149,6 +149,24 @@ try {
   await pageA.getByRole('button', { name: 'Ativar microfone' }).first().click()
   await waitFor('bia vê a ana com som de novo', () => voiceIcons(pageB, 'ana'), (t) => t === 'nenhum')
 
+  // Troca de microfone no meio da chamada (Configurações → Voz).
+  await pageA.getByRole('button', { name: 'Configurações do usuário' }).first().click()
+  const micSelect = pageA.locator('label', { hasText: 'Microfone' }).locator('select')
+  await micSelect.waitFor()
+  const options = await waitFor('lista de microfones carregada', () =>
+    micSelect.locator('option').allTextContents(), (o) => o.length > 1)
+  const other = options.find((o) => o !== 'Padrão do sistema')
+  if (!other) throw new Error(`sem microfone alternativo: ${JSON.stringify(options)}`)
+  await micSelect.selectOption({ label: other })
+  await pageA.screenshot({ path: join(tmpdir(), 'concord-e2e-settings.png') })
+  await pageA.getByRole('button', { name: 'Fechar' }).click()
+  await pageA.waitForTimeout(1500)
+  await waitFor(`ana continua falando após trocar para "${other}"`, () => pageA.evaluate(() =>
+    [...document.querySelectorAll('span')].some((el) =>
+      el.textContent?.includes('(você)') &&
+      el.previousElementSibling?.className.includes('ring-[#23a55a]'))), (ok) => ok === true)
+  await waitFor('bia continua ouvindo a ana', () => audioTracks(pageB), (t) => t.includes('live'))
+
   await pageA.getByRole('button', { name: 'Compartilhar tela' }).click()
   await waitFor('bia vê a tela da ana', () => videoTracks(pageB), (t) => t.some((v) => v.startsWith('live:') && !v.endsWith(':0x0')))
   // A tela em foco ocupa o palco (encosta na largura ou na altura disponível).

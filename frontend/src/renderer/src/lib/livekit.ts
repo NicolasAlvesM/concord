@@ -96,6 +96,14 @@ export class CallMedia {
     else await publication.unmute()
   }
 
+  /** Troca o microfone publicado (outro dispositivo) sem sair da sala. */
+  async replaceMic(track: MediaStreamTrack): Promise<void> {
+    const publication = this.room.localParticipant.getTrackPublication(Track.Source.Microphone)
+    if (!publication?.track) return
+    // userProvidedTrack: o SDK não para nem recria a track — o store é o dono.
+    await publication.track.replaceTrack(track, true)
+  }
+
   async publishScreen(stream: MediaStream): Promise<void> {
     if (!this.connected) return
     const [video] = stream.getVideoTracks()

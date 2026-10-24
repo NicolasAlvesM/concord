@@ -10,6 +10,7 @@ import Modal from './Modal'
 import Button from './Button'
 import VoiceConnectedPanel from './call/VoiceConnectedPanel'
 import { FriendsIcon, ClockIcon, UserPlusIcon, GearIcon, ChatBubbleIcon } from './icons'
+import VoiceSettings from './VoiceSettings'
 
 interface NavItem {
   id: FriendsTab
@@ -235,6 +236,7 @@ export function FriendsSidebar(): React.JSX.Element {
               </div>
             </div>
           </div>
+          {settingsOpen && <VoiceSettings />}
           <Button variant="danger" onClick={handleLogout} disabled={loggingOut}>
             {loggingOut ? 'Saindo...' : 'Sair da conta'}
           </Button>
